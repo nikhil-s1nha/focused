@@ -132,3 +132,30 @@ Do not mark future features as implemented simply because their APIs are describ
 ## Quest path for later
 
 `adb` was not found in the local shell and the Quest was not connected. USB route to test once set up: developer mode, authorize USB debugging personally, `adb reverse tcp:8080 tcp:8080`, open http://localhost:8080 in Quest Browser. Trusted Wi-Fi route: server TLS_CERT/TLS_KEY matching a hostname and issuer trusted on Quest; HTTPS + WSS. Do not bypass certificate protections. See active README for full acceptance checklist. Acquisition electrical/configuration review is the sensor owner's responsibility before body-connected use.
+
+## Session 2 status (Claude, October 17, 2026) — plan only, no code landed
+
+Pulled checkpoint `3a8d98e`, ran `npm ci` + `npm test` in `haunted-room/`: 6/6 pass. Three parallel background agents were dispatched with the file ownership and contracts below; **all three died from an API connection error (ECONNRESET) before writing any files.** Nothing in this section is implemented. Re-dispatch them (same split) or build them sequentially.
+
+### File ownership (keeps parallel agents from colliding)
+
+| Workstream | Owns |
+|---|---|
+| Environment | `public/environment.mjs`, `test/environment.test.mjs` |
+| Director + audio + scenarios | `public/director.mjs`, `public/audio.mjs`, `public/scenarios.mjs`, `test/director.test.mjs`, `test/scenarios.test.mjs` |
+| Studio UI + presets | `public/index.html`, `public/style.css`, `public/studio.mjs`, `public/presets.mjs`, `test/presets.test.mjs` |
+| Integrator (main session) | `public/signal-client.mjs`, `server.mjs` health/heartbeat, then rewrite `public/app.mjs` as glue |
+
+### Contracts
+
+**environment.mjs** — `createEnvironment(scene, options) → { update(dt, time, visuals), interactables: [{id,label,mesh,onInteract}], anchors: {door,radio,clock,cabinet,window,lamp,figure: Vector3}, stats() → {meshes,drawCalls,lights}, dispose() }`; `ATMOSPHERES = ["observatory","cold","ember"]`. Owns all room geometry, lights, `scene.fog`, `scene.background` and the shadow entity (app.mjs then drops ambient/lamp/windowLight/figure/silhouette). `visuals = { tension, state, phase, elapsed, progress, quality, lighting, fog, shadow, shadowPosition, atmosphere, encounter }`. Budget: <120 draw calls, ≤6 lights, no shadow maps, canvas textures guarded for Node. Victorian/industrial observation chamber; door, clock, radio interactables; dust, moonlight shaft; no fast movement toward the player; floor/walls fixed.
+
+**director.mjs** (keep existing API, CONFIG keys and `validSignal`) — add phases `paused`; `pause()`, `resume()` (clears dwell/smoothing), `end()`, `setDuration(s)` (not while running, clamp 30–600); `maxPeakSeconds` (20) forces RELIEF; seeded deterministic encounter scheduler (`encounters: [{id,anchor,minTension,duration,cooldown}]`, `encounterGap` ≈9 s, `seed`) only in BUILD/PEAK, cancelled on WAIT. Encounter ids/anchors: `lamp-flicker`/lamp, `door-creak`/door, `knock`/cabinet, `radio-static`/radio, `shadow-step`/figure. Snapshot adds `elapsed, progress, duration, paused, encounter: {id,anchor,t,seq}|null`. Event timeline (capped 500) and `getSession()` aggregates only (timeInState, peak/mean tension, encounters, relief/peak counts, sources, mean quality, events) — no raw samples.
+
+**audio.mjs** — `class AudioEngine { enabled; async setEnabled(on); setVolume(v); update(snapshot, listenerObject3D, anchors); dispose() }`. Synthesized only, opt-in, HRTF drone at figure, RELIEF warmth, one-shot per new `encounter.seq` at its anchor, silent outside running/usable signal.
+
+**scenarios.mjs** — `SCENARIOS = ["cycle","low","high","dropout","artifacts"]`, `syntheticSample(name, t) → {intensity, signal_quality} | null` (null = dropout), deterministic, drive at ~10 Hz instead of per frame.
+
+**studio.mjs** — `createStudio(handlers) → { inputs(), render(view), toast(msg, kind), showSummary(session), setError(msg), setSound(on), setPresenting(bool), applyPreset(p) }`. Handlers: begin, reset, togglePause, source, scenario, sound, volume, effects, shadowPosition, thresholds (returns error|null), duration, atmosphere, interact, exportSession, fullscreen. `view = { snapshot, mode, dwell:{low,high,needed}, connection:{state,fresh,rate,age,dropped,malformed}, fps, audioEnabled, interactHint }`. Room-first layout, next-action guidance, slider direction hint, dwell progress, summary panel. Keys: Space begin/pause, R reset, 1 build, 2 relief, E interact, H help, F fullscreen, C console. Preserve and add the IDs listed under backlog item 3.
+
+**presets.mjs** — `DEFAULT_PRESET` (version 1, effects, shadowPosition, thresholds, duration, atmosphere, volume), `validatePreset(obj) → {ok,preset,errors}` (never throws), `loadPreset/savePreset(storage[, preset])` key `focused.preset.v1`, `presetToJSON/presetFromJSON` (16 KiB cap).
