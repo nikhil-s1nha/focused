@@ -345,6 +345,12 @@ const CUE_NAMES = [
   "blackoutPowerDown",
   "stinger",
   "eyes",
+  "cameraSwitch",
+  "monitorUp",
+  "monitorDown",
+  "powerCritical",
+  "lightFlicker",
+  "blackout",
 ];
 
 test("limiter: master routes through a compressor when the context has one", async () => {

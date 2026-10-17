@@ -223,3 +223,16 @@ test("getSession returns a serializable summary without raw signals", () => {
   }
   assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
 });
+
+test("end(reason) ends a running session with that reason; no-op otherwise", () => {
+  const d = new Director();
+  assert.equal(d.end("caught"), false, "not running yet");
+  d.start();
+  d.step(1, 1);
+  assert.equal(d.end("caught"), true);
+  assert.equal(d.phase, "ended");
+  assert.equal(d.getSession().endedReason, "caught");
+  assert.equal(d.snapshot(2).tension, 0);
+  assert.equal(d.end("again"), false);
+  assert.equal(d.getSession().endedReason, "caught");
+});

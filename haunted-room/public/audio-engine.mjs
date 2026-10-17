@@ -122,7 +122,8 @@ export class AudioEngine {
    * One-shot synthesized cue. Returns true when a sound was scheduled.
    *   cue("footstep", { position: {x,z}, intensity, pitch })
    * Names: footstep, thump, knock, breath, static, powerWarning,
-   *        blackoutPowerDown, stinger, eyes.
+   *        blackoutPowerDown, stinger, eyes, cameraSwitch, monitorUp, monitorDown,
+   *        powerCritical, lightFlicker, blackout.
    * `position` pans/attenuates relative to the listener (tracked in update);
    * a plain `pan` (-1..1) can be passed instead. Nothing plays before
    * setEnabled(true) — the opt-in contract holds for cues too.
@@ -168,6 +169,25 @@ export class AudioEngine {
         return true;
       case "eyes":
         this.#eyes(level * 0.25, pan);
+        return true;
+      case "cameraSwitch":
+        this.#blip(level * 0.6, pan, [1400, 900], 0.09, "square");
+        return true;
+      case "monitorUp":
+        this.#blip(level * 0.7, pan, [90, 1100], 0.45, "sawtooth");
+        return true;
+      case "monitorDown":
+        this.#blip(level * 0.7, pan, [900, 60], 0.4, "sawtooth");
+        return true;
+      case "powerCritical":
+        this.#powerWarning(level * 1.15, pan, 3, 147);
+        return true;
+      case "lightFlicker":
+        this.#blip(level * 0.5, pan, [120, 100], 0.22, "sawtooth");
+        return true;
+      case "blackout":
+        this.#powerDown(level * 1.5, pan);
+        this.#knock(level * 1.3, pan, 1, 70);
         return true;
       default:
         return false;
@@ -489,19 +509,38 @@ export class AudioEngine {
     src.stop?.(t0 + 3.3);
   }
   // Low double-beep power warning (sine, deliberately dull — not an alarm).
-  #powerWarning(level, pan) {
+  #powerWarning(level, pan, beeps = 2, freq = 196) {
     const ctx = this.ctx;
     const gain = this.#tail(pan);
     const t0 = ctx.currentTime + 0.02;
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < beeps; i++) {
       const osc = ctx.createOscillator();
       osc.type = "sine";
-      osc.frequency.value = 196;
+      osc.frequency.value = freq;
       osc.connect(gain);
       this.#envelope(gain.gain, level * 0.8, t0 + i * 0.42, 0.015, 0.2);
       osc.start?.(t0 + i * 0.42);
       osc.stop?.(t0 + i * 0.42 + 0.3);
     }
+  }
+  // Short pitch-swept blip (CRT switch, console up/down, ballast buzz).
+  #blip(level, pan, [from, to], seconds, type = "sine") {
+    const ctx = this.ctx;
+    const gain = this.#tail(pan);
+    const t0 = ctx.currentTime + 0.02;
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.value = from;
+    osc.frequency.setValueAtTime?.(from, t0);
+    osc.frequency.exponentialRampToValueAtTime?.(to, t0 + seconds);
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 2400;
+    osc.connect(filter);
+    filter.connect(gain);
+    this.#envelope(gain.gain, level, t0, 0.01, seconds);
+    osc.start?.(t0);
+    osc.stop?.(t0 + seconds + 0.1);
   }
   // Descending whine: everything electrical sagging to nothing.
   #powerDown(level, pan) {

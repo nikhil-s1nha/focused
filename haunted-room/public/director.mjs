@@ -129,6 +129,19 @@ export class Director {
     this.logEvent("resume");
     return true;
   }
+  // Externally end a running session (e.g. caught by the Attendant). Mirrors
+  // the natural ending; touches no signal handling. Returns false if not running.
+  end(reason = "ended") {
+    if (this.phase !== "running") return false;
+    this.paused = false;
+    this.phase = "ended";
+    this.state = "RELIEF";
+    this.tension = 0;
+    this.encounter = null;
+    this.endedReason = String(reason);
+    this.logEvent("end", { reason: this.endedReason });
+    return true;
+  }
   receive(message, now) {
     if (this.paused || !validSignal(message)) return false;
     this.input = { ...message };

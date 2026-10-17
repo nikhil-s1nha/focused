@@ -325,10 +325,12 @@ export function createAtmosphere(
         // One smooth brown-out dip and recovery.
         sputter = 1 - flick.intensity * Math.sin(Math.PI * p);
       } else {
-        // Fluorescent chatter: deterministic on/off at ~24 steps/s, decaying.
-        const slot = Math.floor(flickClock * 24);
+        // Fluorescent chatter: deterministic on/off, decaying. Photosensitivity
+        // guard: 5 steps/s means at most ~2.5 on/off pairs per second (< 3 Hz),
+        // and the dip depth is capped so it never reads as a full strobe.
+        const slot = Math.floor(flickClock * 5);
         const off = hash01(slot) < 0.55;
-        sputter = off ? 1 - flick.intensity * (1 - p * 0.6) : 1;
+        sputter = off ? 1 - Math.min(0.8, flick.intensity) * (1 - p * 0.6) : 1;
       }
     }
     // Blackout leaves ~2% lamp remnant so emissives/silhouettes still read.
