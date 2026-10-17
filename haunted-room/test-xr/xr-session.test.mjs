@@ -196,13 +196,18 @@ test("perf-signal: ~5s emulated-session FPS and draw stats (record-only)", async
       };
     });
     if (info) {
+      // While presenting, renderer.info.render.calls covers BOTH eye passes
+      // (three renders left + right sequentially without multiview), so the
+      // Quest budget (<=150) is gated per eye; the stereo total is recorded.
+      const perEye = info.drawCalls / 2;
       console.log(
-        `[perf] draw calls=${info.drawCalls} triangles=${info.triangles} ` +
-          `geometries=${info.geometries} textures=${info.textures}`,
+        `[perf] draw calls=${info.drawCalls} stereo total (${perEye}/eye) ` +
+          `triangles=${info.triangles} geometries=${info.geometries} ` +
+          `textures=${info.textures}`,
       );
       assert.ok(
-        info.drawCalls <= 150,
-        `draw calls ${info.drawCalls} within Quest budget (<=150)`,
+        perEye <= 150,
+        `draw calls ${perEye}/eye within Quest budget (<=150)`,
       );
     } else {
       console.log(

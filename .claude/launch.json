@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "haunted-room",
+      "cwd": "haunted-room",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start"],
+      "port": 8080
+    }
+  ]
+}

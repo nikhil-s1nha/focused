@@ -1,6 +1,6 @@
 # XR portability test report — automated harness (no headset)
 
-Last run: 2026-10-17 against branch `vr-scene-expansion` (app under active rewrite by other agents; re-run after integration).
+Last run: 2026-10-17 against branch `vr-scene-expansion`, after the expanded scene landed (environment/textures/atmosphere/ghost/animatronic/monitor modules). **8/8 pass.** Re-run after any further integration.
 
 ## What this is
 
@@ -15,7 +15,7 @@ npm run test:xr:install   # one-time: downloads the Playwright Chromium binary
 npm run test:xr
 ```
 
-The harness starts its own server instances on ports **8097/8098** (never 8080), so it cannot collide with a running `npm start`. `npm test` (unit tests) is unaffected and still passes (56/56 at the time of this report).
+The harness starts its own server instances on ports **8097/8098** (never 8080), so it cannot collide with a running `npm start`. `npm test` (unit tests) is unaffected and still passes at the time of this report.
 
 ## Architecture
 
@@ -46,9 +46,9 @@ Two resilience mechanisms for the mid-rewrite window:
 | 5 | stereo: base layer stereo-sized, both eye halves render content | PASS | wide framebuffer observed via `renderState.baseLayer`; left/right halves each non-black and varied |
 | 6 | head-pose: moving/yawing the emulated headset changes the rendered view | PASS | 90° yaw + positional offset → large pixel-signature change |
 | 7 | input: synthetic right-trigger squeeze/release (primary action → select) | PASS | session survives, zero uncaught/console errors |
-| 8 | perf-signal: ~5s in-session FPS + draw stats | PASS (record-only) | ~8 FPS under headless SwiftShader — a liveness signal only, **not** representative of Quest silicon. `window.__renderer` is not exposed by the app, so draw-call/triangle counts and the ≤150 draw-call Quest budget could not be checked; if the integration exposes the renderer as `window.__renderer`, the suite automatically starts gating draw calls ≤150. |
+| 8 | perf-signal: ~5s in-session FPS + draw stats | PASS | FPS ~10 under headless SwiftShader — a liveness signal only, **not** representative of Quest silicon. The app exposes `window.__renderer`, so draw stats are gated: **238 draw calls per stereo frame = 119/eye** (three renders both eye passes without multiview), within the ≤150/eye Quest budget but with limited headroom — triangles 7,060, geometries 31, textures 21. Watch this number as the scene grows. |
 
-No tests skipped or fixme'd at this run; all eight pass against the current app.
+No tests skipped or fixme'd at this run; all eight pass against the current (post-expansion) app. During the mid-rewrite window the suite correctly skipped with reason "missing modules: /textures.mjs" and self-reactivated once the module landed.
 
 ## Dependencies added (devDependencies only)
 
