@@ -77,6 +77,12 @@
             Slider <strong>LOW builds tension</strong>, HIGH gives relief
             &mdash; changes take a few seconds.
           </li>
+          <li>
+            <strong>Watch the Attendant</strong> &mdash; it only moves while you
+            look away (or while no camera shows it). <strong>Stare down the
+            ghost</strong>. <strong>Conserve power</strong>: cameras and the
+            floodlight drain it. A blackout is danger.
+          </li>
           <li><strong>Sound stays off</strong> until you enable it in the console.</li>
         </ol>
         <button id="start" type="button" class="primary">Begin experience</button>
@@ -86,6 +92,54 @@
         </p>
       </section>
     </main>
+
+    <!-- Power + cameras dock (top-left, below the header). Never head-locked. -->
+    <section id="powerDock" class="dock" aria-label="Power and cameras">
+      <div class="dock-row">
+        <span class="dock-title">POWER</span>
+        <strong id="powerPct" class="mono">100%</strong>
+        <span id="powerEta" class="dock-eta mono">steady</span>
+      </div>
+      <div
+        id="powerBar"
+        class="power-bar"
+        data-tier="ok"
+        role="progressbar"
+        aria-label="Power remaining"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="100"
+      >
+        <div id="powerFill" class="power-fill"></div>
+      </div>
+      <div class="dock-row pips" aria-label="Active power loads">
+        <span id="loadBase" class="pip on">GRID</span>
+        <span id="loadMonitor" class="pip">CAMS</span>
+        <span id="loadFlood" class="pip">LIGHT</span>
+      </div>
+      <div class="dock-row">
+        <button id="camToggle" type="button" aria-pressed="false" title="Toggle cameras (C)">
+          Cameras <kbd>C</kbd>
+        </button>
+        <button id="floodBtn" type="button" aria-pressed="false" title="Hold for floodlight (L)">
+          Floodlight <kbd>L</kbd>
+        </button>
+      </div>
+      <div class="dock-row">
+        <button id="doorBtn" type="button" aria-pressed="false" title="Seal the corridor door (X). Costs power.">
+          Seal door <kbd>X</kbd>
+        </button>
+        <span id="loadDoor" class="pip">DOOR</span>
+      </div>
+      <div id="camButtons" class="dock-row cams" role="group" aria-label="Camera select">
+        <button type="button" data-cam="0" disabled>1</button>
+        <button type="button" data-cam="1" disabled>2</button>
+        <button type="button" data-cam="2" disabled>3</button>
+        <button type="button" data-cam="3" disabled>4</button>
+        <button id="camNext" type="button" disabled title="Next camera (V)">Next <kbd>V</kbd></button>
+      </div>
+      <div id="camLabel" class="dock-cam mono">CAMERAS DOWN</div>
+    </section>
 
     <!-- Collapsible right-side director console -->
     <aside id="directorConsole" aria-label="Director console">
@@ -132,6 +186,26 @@
           <option value="artifacts">Artifacts</option>
         </select>
       </div>
+
+      <fieldset class="toggles" id="hauntControls">
+        <legend>Haunt</legend>
+        <div class="field">
+          <label for="difficulty">Night</label>
+          <select id="difficulty">
+            <option value="easy">Easy (AI 2)</option>
+            <option value="normal" selected>Normal (AI 5)</option>
+            <option value="nightmare">Nightmare (AI 14)</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="aiLevel"
+            >AI level <output id="aiLevelValue" for="aiLevel">5</output></label
+          >
+          <input id="aiLevel" type="range" min="0" max="20" step="1" value="5" />
+          <div class="range-ends" aria-hidden="true"><span>0 &middot; passive</span><span>20 &middot; relentless</span></div>
+        </div>
+      </fieldset>
 
       <fieldset class="toggles">
         <legend>Effects</legend>
@@ -220,6 +294,9 @@
     <div id="crosshair" class="hidden" aria-hidden="true"></div>
     <div id="interactHint" class="pill hidden">Press E to interact</div>
 
+    <!-- Tape / alert captions (always shown, even with sound off) -->
+    <div id="caption" class="caption hidden" role="status" aria-live="polite"></div>
+
     <!-- Transient message pill -->
     <div id="toast" class="pill hidden" role="status" aria-live="polite"></div>
 
@@ -232,6 +309,13 @@
       <div class="diag">
         <small>ENCOUNTER</small><strong id="encounterStat">&ndash;</strong>
       </div>
+      <div class="diag"><small>POWER</small><strong id="powerStat">100%</strong></div>
+      <div class="diag"><small>CAM</small><strong id="camStat">DOWN</strong></div>
+      <div class="diag">
+        <small>ATTENDANT</small><strong id="attendantStat">&ndash;</strong>
+      </div>
+      <div class="diag"><small>GHOST</small><strong id="ghostStat">&ndash;</strong></div>
+      <div class="diag"><small>AI</small><strong id="aiStat">&ndash;</strong></div>
       <div class="diag"><small>FPS</small><strong id="fpsStat">&ndash;</strong></div>
       <div class="diag"><small>RATE</small><strong id="rateStat">&ndash;</strong></div>
       <div class="diag">
@@ -259,6 +343,14 @@
         <dd>Relief preset</dd>
         <dt><kbd>E</kbd></dt>
         <dd>Interact</dd>
+        <dt><kbd>C</kbd></dt>
+        <dd>Cameras up / down</dd>
+        <dt><kbd>X</kbd></dt>
+        <dd>Seal / open the corridor door (power cost)</dd>
+        <dt><kbd>V</kbd> / <kbd>Tab</kbd></dt>
+        <dd>Next camera</dd>
+        <dt><kbd>L</kbd> (hold)</dt>
+        <dd>Floodlight</dd>
         <dt><kbd>H</kbd></dt>
         <dd>Toggle help</dd>
         <dt><kbd>F</kbd></dt>
@@ -268,6 +360,20 @@
         <dt><kbd>WASD</kbd></dt>
         <dd>Walk</dd>
       </dl>
+      <p>
+        <strong>The loop.</strong> The Attendant only moves while nothing is
+        watching it: look at it, or have its camera up. If it reaches you
+        unwatched, you are caught. The ghost is the opposite &mdash; it charges
+        while you ignore it, and staring it down drives it back. Cameras and the
+        floodlight drain <strong>power</strong>; at 0% the lights die and
+        something comes for you in the dark.
+      </p>
+      <p>
+        <strong>VR:</strong> trigger on the Begin/Sound panels or the props;
+        <em>B / Y</em> raises the cameras, trigger on the monitor cycles
+        cameras, hold <em>grip</em> for the floodlight, <em>A / X</em> toggles
+        sound.
+      </p>
       <p>
         The response-proxy slider is inverted on purpose: <strong>LOW input
         builds tension</strong>, sustained HIGH input brings relief. Smoothing

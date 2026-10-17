@@ -13,28 +13,34 @@ import { isObserved } from "./haunt.mjs";
 
 /* ------------------------------ zones ------------------------------ */
 
-// The Attendant's path. Index 0 is its home spot; the coordinator's waypoint
-// index and animatronic.waypointIndex both follow it (home + 5 nodes = 6).
-export const ATTENDANT_HOME = Object.freeze({ x: -2.6, z: -4.8 });
+// The Attendant creeps along the LEFT wall toward the player's shoulder. The
+// bearings (from the player at z=2 facing -Z) are 52..88 degrees, while the
+// ghost waits dead ahead in the corridor (0 degrees). With the 26 degree focus
+// cone below, you can never keep both in view: watch one and the other acts.
+export const ATTENDANT_HOME = Object.freeze({ x: -3.2, z: 2.0 });
 export const ATTENDANT_PATH = Object.freeze([
-  { x: -2.2, z: -3.6 },
-  { x: -1.4, z: -2.2 },
-  { x: -0.8, z: -0.6 },
-  { x: -0.3, z: 0.6 },
-  { x: 0, z: 1.2 }, // clamped to the safe radius by the entity itself
+  { x: -3.2, z: 1.2 },
+  { x: -3.0, z: 0.4 },
+  { x: -2.6, z: 0.0 },
+  { x: -2.2, z: 0.5 },
+  { x: -1.8, z: 1.0 }, // final node, ~2 m from the player's left front
 ]);
 export const ATTENDANT_NODE_COUNT = ATTENDANT_PATH.length + 1;
 
+// "Observed" means roughly centered in view, not merely somewhere on screen.
+export const FOCUS_HALF_ANGLE = (26 * Math.PI) / 180;
+export function focusObserved(camera, target) {
+  return isObserved(camera, target, FOCUS_HALF_ANGLE);
+}
+
 // Which security-camera zone covers each waypoint (monitor.mjs default cams:
-// far-corner, doorway, cabinet, rear). Home + first node sit by the cabinet,
-// the middle of the room is seen from the far corner, the last two nodes are
-// behind/beside the player ("rear").
+// far-corner, doorway, cabinet, rear).
 export const ATTENDANT_ZONES = Object.freeze([
-  "cabinet",
-  "cabinet",
-  "far-corner",
-  "far-corner",
   "rear",
+  "rear",
+  "far-corner",
+  "far-corner",
+  "far-corner",
   "rear",
 ]);
 
@@ -247,6 +253,71 @@ export class SessionStats {
       floodlightSeconds: r1(this.floodlightSeconds),
       cameraSwitches: this.cameraSwitches,
       aiLevel: this.ai,
+    };
+  }
+}
+
+/* ------------------------------ phone tape ------------------------------ */
+
+// Original in-world "answering machine" briefing, shown as captions (always)
+// with a soft static cue (only when sound is opted in). Teaches the rules in
+// fiction. All text is this project's own.
+export const TAPE_SCRIPT = Object.freeze([
+  { at: 1.5, text: "TAPE 1 -- Night attendant log. You are alone in the observation chamber." },
+  { at: 7, text: "The Attendant only moves when nothing is watching it. Keep it in view, or on a camera." },
+  { at: 13, text: "The thing in the corridor is the opposite. Look at it. Do not look away." },
+  { at: 19, text: "Power is limited. Cameras and the floodlight drain it. The door seal costs power too." },
+  { at: 25, text: "If the lights die, stay quiet. ...Good luck." },
+]);
+
+export class TapeScript {
+  constructor(script = TAPE_SCRIPT) {
+    this.script = script;
+    this.reset();
+  }
+  reset() {
+    this.next = 0;
+  }
+  /** Lines whose time has come at session `elapsed` seconds. */
+  due(elapsed) {
+    const out = [];
+    while (this.next < this.script.length && elapsed >= this.script[this.next].at) {
+      out.push(this.script[this.next++].text);
+    }
+    return out;
+  }
+}
+
+/* --------------------------- phantom sounds --------------------------- */
+
+// Audio-only channel: knocks, steps and breaths with NO entity behind them.
+// Deterministic for a given rng; interval shrinks with tension; never spawns
+// during blackout (the real threat takes over) or after a scare began.
+export class PhantomSounds {
+  constructor({ rng = Math.random, minGap = 9, maxGap = 20 } = {}) {
+    this.rng = rng;
+    this.minGap = minGap;
+    this.maxGap = maxGap;
+    this.reset();
+  }
+  reset() {
+    this.t = 0;
+    this.nextAt = this.minGap + this.rng() * (this.maxGap - this.minGap);
+  }
+  update(dt, { tension = 0, blackout = false, scared = false, state = "BUILD" } = {}) {
+    if (blackout || scared || state === "WAIT" || state === "RELIEF") return null;
+    this.t += Math.max(0, Math.min(0.25, dt));
+    if (this.t < this.nextAt) return null;
+    this.t = 0;
+    const squeeze = 1 - 0.5 * Math.max(0, Math.min(1, tension));
+    this.nextAt = (this.minGap + this.rng() * (this.maxGap - this.minGap)) * squeeze;
+    const kinds = ["knock", "footstep", "thump", "breath"];
+    const cue = kinds[Math.floor(this.rng() * kinds.length) % kinds.length];
+    const side = this.rng() < 0.5 ? -1 : 1;
+    return {
+      cue,
+      position: { x: side * (1.5 + this.rng() * 1.8), z: -3 + this.rng() * 6 },
+      intensity: 0.35 + 0.3 * tension,
     };
   }
 }

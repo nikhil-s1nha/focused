@@ -9,8 +9,30 @@ import { createMaterialLibrary } from "./textures.mjs";
 import { createAtmosphere, ATMOSPHERES } from "./atmosphere.mjs";
 import { createAnimatronic } from "./animatronic.mjs";
 import { createGhost } from "./ghost.mjs";
-import { createVolumetricCone } from "./volumetrics.mjs";
+import { createVolumetricCone, createDustMotes } from "./volumetrics.mjs";
 import { createMonitor } from "./monitor.mjs";
+import { Haunt } from "./haunt.mjs";
+import { PowerSystem } from "./power.mjs";
+import {
+  ATTENDANT_HOME,
+  ATTENDANT_NODE_COUNT,
+  ATTENDANT_PATH,
+  BLACKOUT_SCARE_DELAY,
+  BlackoutTimeline,
+  DIFFICULTY,
+  JumpscareFlow,
+  PhantomSounds,
+  SessionStats,
+  TapeScript,
+  attendantZone,
+  clampAi,
+  difficultyFor,
+  entityObserved,
+  focusObserved,
+  formatEta,
+  ghostZone,
+  powerTier,
+} from "./session-flow.mjs";
 
 const $ = (id) => document.getElementById(id);
 const director = new Director();
@@ -73,9 +95,60 @@ const atmosphere = createAtmosphere(THREE, {
   windowLight,
 });
 atmosphere.setDomOverlay(true);
-const attendant = createAnimatronic(THREE, scene);
+// The Attendant is rebuilt (cheaply) whenever the hunt model retreats or the
+// session restarts, so its mesh always matches the coordinator's waypoint.
+// Its lunge targets the head position captured at (re)build time.
+let attendant = null;
+let attendantWp = 0; // haunt waypoint this instance was built at
+function headSpot() {
+  const p = new THREE.Vector3();
+  camera.updateWorldMatrix(true, false);
+  camera.getWorldPosition(p);
+  return p;
+}
+function buildAttendant(wp = 0) {
+  attendant?.dispose();
+  const start = wp === 0 ? ATTENDANT_HOME : ATTENDANT_PATH[wp - 1];
+  const head = headSpot();
+  attendant = createAnimatronic(THREE, scene, {
+    x: start.x,
+    z: start.z,
+    waypoints: ATTENDANT_PATH.slice(wp),
+    safeRadius: 0.9,
+    playerX: head.x,
+    playerZ: head.z,
+  });
+  attendantWp = wp;
+}
+buildAttendant(0);
+const meshWaypoint = () => attendantWp + attendant.waypointIndex + 1;
 const ghost = createGhost(THREE, scene);
-const monitor = createMonitor(THREE, renderer, scene);
+const monitor = createMonitor(THREE, renderer, scene, {
+  active: false,
+  xrSafe: true, // RT feed also renders in VR (xr is disabled around it, see render loop)
+});
+const haunt = new Haunt({
+  blackoutDelay: BLACKOUT_SCARE_DELAY,
+  entities: [
+    { id: "attendant", kind: "stalker", aggression: 5, waypoints: ATTENDANT_NODE_COUNT },
+    { id: "ghost", kind: "charger", aggression: 5 },
+  ],
+});
+const power = new PowerSystem();
+const flow = new JumpscareFlow();
+const blackoutTimeline = new BlackoutTimeline();
+const stats = new SessionStats();
+const tape = new TapeScript();
+const phantom = new PhantomSounds();
+// Floodlight: one spot light that always exists (intensity 0 when off) so the
+// light count never changes at runtime (no shader recompiles on Quest).
+const floodlight = new THREE.SpotLight(0xfff0d0, 0, 16, Math.PI / 8, 0.45, 1.6);
+const floodTarget = new THREE.Object3D();
+floodTarget.position.set(0, 0, -1);
+floodlight.add(floodTarget);
+floodlight.target = floodTarget;
+camera.add(floodlight);
+floodlight.position.set(0.08, -0.1, 0);
 const lampCone = createVolumetricCone(THREE, {
   radiusBottom: 1.5,
   height: 2.7,
@@ -85,6 +158,8 @@ const lampCone = createVolumetricCone(THREE, {
 });
 lampCone.mesh.position.set(0, 2.72, -1);
 scene.add(lampCone.mesh);
+const lampMotes = createDustMotes(THREE, { count: 120, radiusBottom: 1.4, height: 2.6 });
+lampCone.mesh.add(lampMotes.points);
 
 // ---------- audio ----------
 const audio = new AudioEngine();
@@ -128,18 +203,81 @@ client.setManualQuality(+$("quality").value);
 // ---------- session flow ----------
 let current = director.snapshot(performance.now() / 1000);
 let summaryShown = false;
+let endHandled = false;
+let powerScale = 1; // power is tuned for 120 s; stretch/shrink with the duration
+let hudNote = { text: "", until: 0 };
+let floodDesk = false; // L key / button held
+let floodVR = false; // grip held
+let doorSealed = false;
+let windLocked = false; // blackout sequence owns the music box wind
+const scratch = new THREE.Vector3();
+
+function notice(text, { alert = false, seconds = 4 } = {}) {
+  hudNote = { text, until: performance.now() / 1000 + seconds };
+  const el = $("caption");
+  el.textContent = text;
+  el.classList.toggle("alert", alert);
+  el.classList.remove("hidden");
+  clearTimeout(notice.timer);
+  notice.timer = setTimeout(() => el.classList.add("hidden"), seconds * 1000);
+}
+function cue(name, opts) {
+  try {
+    audio.cue(name, opts);
+  } catch {
+    /* audio is optional */
+  }
+}
+function applyAggression() {
+  haunt.setAggression(clampAi($("aiLevel").value));
+}
+function resetWorld() {
+  haunt.reset();
+  power.reset();
+  flow.reset();
+  blackoutTimeline.reset();
+  tape.reset();
+  phantom.reset();
+  stats.reset();
+  if (attendant.jumping || meshWaypoint() !== 0 || attendant.stage !== 0) buildAttendant(0);
+  attendant.setBlackout(false);
+  attendant.setStage(0);
+  ghost.setState("hidden");
+  ghost.setBlackout(false);
+  monitor.setSignalLost(false);
+  monitor.setActive(false);
+  monitor.selectCamera(0);
+  atmosphere.setBlackout(false);
+  musicBox.setWind(1);
+  musicBox.setMuffled(false);
+  windLocked = false;
+  floodDesk = floodVR = false;
+  setDoor(false, true);
+  endHandled = false;
+  hudNote = { text: "", until: 0 };
+  $("caption").classList.add("hidden");
+}
 function begin() {
   director.config.duration = +$("duration").value;
   director.start();
+  resetWorld();
+  buildAttendant(0); // re-captures the player's head position for the lunge
+  haunt.start();
+  applyAggression();
+  stats.ai = clampAi($("aiLevel").value);
+  powerScale = 120 / director.config.duration;
+  power.start();
   summaryShown = false;
   $("position").disabled = true;
   $("overlay").classList.add("hidden");
+  $("summaryPanel").classList.add("hidden");
   $("pause").textContent = "Pause";
   setState("The room is listening. You can reset at any time.");
   if (!renderer.xr.isPresenting) $("crosshair").classList.remove("hidden");
 }
 function reset() {
   director.reset();
+  resetWorld();
   summaryShown = false;
   $("position").disabled = false;
   $("overlay").classList.remove("hidden");
@@ -154,10 +292,12 @@ function togglePause() {
   if (director.phase !== "running") return begin();
   if (director.paused) {
     director.resume(now);
+    power.start();
     $("pause").textContent = "Pause";
     toast("Resumed");
   } else {
     director.pause(now);
+    power.stop();
     $("pause").textContent = "Resume";
     toast("Paused");
   }
@@ -177,25 +317,46 @@ function toast(text) {
 }
 
 // ---------- end-of-session summary ----------
+const fnafSummary = () => stats.toJSON(power.getState().percent);
+function sessionExport() {
+  return { ...director.getSession(), fnaf: fnafSummary() };
+}
 function showSummary() {
   const s = director.getSession();
-  const stats = Object.entries(s.encounterStats)
+  const f = fnafSummary();
+  const stat = Object.entries(s.encounterStats)
     .filter(([, v]) => v.count > 0)
     .map(
       ([id, v]) =>
         `<tr><td>${id}</td><td>${v.count}</td><td>${v.avgResponse > 0 ? "+" : ""}${v.avgResponse.toFixed(3)}</td></tr>`,
     )
     .join("");
+  const headline =
+    s.endedReason === "caught"
+      ? `<p class="caught"><strong>CAUGHT.</strong> ${f.jumpscare?.cause ?? ""}</p>`
+      : s.endedReason === "completed"
+        ? "<p><strong>You survived the night.</strong></p>"
+        : "<p>Session ended.</p>";
   $("summaryContent").innerHTML = `
-    <p>${s.endedReason === "completed" ? "Session completed." : "Session ended."}
-       Peak tension <strong>${s.peakTension.toFixed(2)}</strong> over ${Math.round(s.elapsed)}s.</p>
+    ${headline}
+    <p>Peak tension <strong>${s.peakTension.toFixed(2)}</strong> over ${Math.round(s.elapsed)}s.</p>
+    <table class="summary-table">
+      <tr><th>Survival</th><th></th></tr>
+      <tr><td>Ended by</td><td>${f.jumpscare ? `${f.jumpscare.entity} (${f.jumpscare.kind}) at ${f.jumpscare.atElapsed}s` : s.endedReason}</td></tr>
+      <tr><td>Power at end</td><td>${f.powerAtEndPercent}%</td></tr>
+      <tr><td>Blackout</td><td>${f.blackoutAtElapsed == null ? "none" : `at ${f.blackoutAtElapsed}s`}</td></tr>
+      <tr><td>Attendant moves</td><td>${f.entityMoves.attendant}</td></tr>
+      <tr><td>Camera uptime</td><td>${f.cameraUptimeSeconds}s (${f.cameraUptimePercent}%), ${f.cameraSwitches} switches</td></tr>
+      <tr><td>Floodlight</td><td>${f.floodlightSeconds}s</td></tr>
+      <tr><td>AI level</td><td>${f.aiLevel}</td></tr>
+    </table>
     <table class="summary-table">
       <tr><th>State</th><th>Seconds</th></tr>
       ${Object.entries(s.timeInState)
         .map(([k, v]) => `<tr><td>${k}</td><td>${v.toFixed(1)}</td></tr>`)
         .join("")}
     </table>
-    ${stats ? `<table class="summary-table"><tr><th>Encounter</th><th>Count</th><th>Avg response</th></tr>${stats}</table>` : "<p>No encounters fired.</p>"}
+    ${stat ? `<table class="summary-table"><tr><th>Encounter</th><th>Count</th><th>Avg response</th></tr>${stat}</table>` : "<p>No encounters fired.</p>"}
     <p class="console-note">Derived control values only; no raw sensor data is stored.</p>`;
   $("summaryPanel").classList.remove("hidden");
 }
@@ -217,6 +378,7 @@ const PRESET_FIELDS = [
   "volume",
   "position",
   "scenario",
+  "aiLevel",
 ];
 const PRESET_TOGGLES = ["sound", "lighting", "fog", "shadow"];
 function collectPreset() {
@@ -236,6 +398,55 @@ function applyPreset(p) {
     if (t in p && $(t) && t !== "sound") $(t).checked = !!p[t];
   applyVolume();
   return true;
+}
+
+// ---------- power / cameras / floodlight / door ----------
+function setCameras(up) {
+  if (up && power.getState().blackout) {
+    notice("No power. The monitor is dead.", { alert: true });
+    return;
+  }
+  if (monitor.isActive() === up) return;
+  monitor.setActive(up);
+  power.setLoad("monitor", up);
+  cue(up ? "monitorUp" : "monitorDown");
+}
+function selectCamera(i) {
+  if (!monitor.isActive()) return;
+  const n = monitor.getCamera().count;
+  monitor.selectCamera(((i % n) + n) % n);
+  stats.cameraSwitches++;
+  cue("cameraSwitch");
+}
+function nextCamera() {
+  if (!monitor.isActive()) return;
+  selectCamera(Math.max(0, monitor.getCamera().index) + 1);
+}
+function toggleCameras() {
+  setCameras(!monitor.isActive());
+}
+function setDoor(sealed, silent = false) {
+  if (sealed && (power.getState().blackout || director.phase !== "running")) {
+    if (!silent) notice(director.phase !== "running" ? "Begin first." : "No power. The seal will not hold.", { alert: true });
+    return;
+  }
+  if (doorSealed === sealed) return;
+  doorSealed = sealed;
+  power.setLoad("door", sealed);
+  environment.creakDoor(sealed ? -2 : 1.1);
+  if (!silent) {
+    cue(sealed ? "thump" : "knock", { position: { x: 0.95, z: -5.0 }, intensity: 0.6 });
+    notice(sealed ? "Door sealed. The corridor cannot reach you. Power draining." : "Door open.");
+  }
+}
+const toggleDoor = () => setDoor(!doorSealed);
+function floodOn() {
+  return (
+    (floodDesk || floodVR) &&
+    director.phase === "running" &&
+    !director.paused &&
+    !power.getState().blackout
+  );
 }
 
 // ---------- UI wiring ----------
@@ -259,6 +470,38 @@ $("source").onchange = () => {
   client.setMode(mode);
   $("intensity").disabled = mode !== "manual";
   $("quality").disabled = mode !== "manual";
+};
+$("camToggle").onclick = toggleCameras;
+$("camNext").onclick = nextCamera;
+$("doorBtn").onclick = toggleDoor;
+for (const b of document.querySelectorAll("#camButtons [data-cam]"))
+  b.onclick = () => selectCamera(+b.dataset.cam);
+{
+  const f = $("floodBtn");
+  const on = (e) => {
+    floodDesk = true;
+    e.preventDefault();
+  };
+  const off = () => (floodDesk = false);
+  f.addEventListener("pointerdown", on);
+  for (const ev of ["pointerup", "pointerleave", "pointercancel", "blur"])
+    f.addEventListener(ev, off);
+}
+const onAi = () => {
+  const n = clampAi($("aiLevel").value);
+  $("aiLevel").value = n;
+  $("aiLevelValue").textContent = n;
+  $("difficulty").value = difficultyFor(n);
+  applyAggression();
+};
+$("aiLevel").addEventListener("input", onAi);
+$("aiLevel").addEventListener("change", onAi);
+$("difficulty").onchange = () => {
+  const d = DIFFICULTY[$("difficulty").value];
+  if (!d) return;
+  $("aiLevel").value = d.ai;
+  onAi();
+  toast(`${d.label}: AI level ${d.ai}`);
 };
 $("scenario").onchange = () => client.setScenario($("scenario").value);
 $("presetTense").onclick = () => {
@@ -314,7 +557,7 @@ $("consoleToggle").onclick = () => {
 $("dismissSummary").onclick = () =>
   $("summaryPanel").classList.add("hidden");
 $("exportSession").onclick = () => {
-  download("quiet-room-session.json", JSON.stringify(director.getSession(), null, 2));
+  download("quiet-room-session.json", JSON.stringify(sessionExport(), null, 2));
   toast("Session summary downloaded");
 };
 $("savePreset").onclick = () => {
@@ -335,6 +578,7 @@ $("resetPreset").onclick = () => {
     volume: "0.6",
     position: "back",
     scenario: "cycle",
+    aiLevel: "5",
     lighting: true,
     fog: true,
     shadow: true,
@@ -379,12 +623,23 @@ addEventListener("keydown", (e) => {
   else if (k === "2") $("presetCalm").click();
   else if (k === "h") $("helpToggle").click();
   else if (k === "e") interact();
+  else if (k === "c") toggleCameras();
+  else if (k === "v") nextCamera();
+  else if (k === "tab") {
+    e.preventDefault();
+    nextCamera();
+  } else if (k === "x") toggleDoor();
+  else if (k === "l") floodDesk = true;
   else if (k === "f")
     document.fullscreenElement
       ? document.exitFullscreen()
       : document.documentElement.requestFullscreen();
 });
-addEventListener("keyup", (e) => held.delete(e.key.toLowerCase()));
+addEventListener("keyup", (e) => {
+  const k = e.key.toLowerCase();
+  held.delete(k);
+  if (k === "l") floodDesk = false;
+});
 
 // ---------- desktop look + walk ----------
 let dragging = false,
@@ -411,7 +666,7 @@ renderer.domElement.addEventListener("pointermove", (e) => {
 renderer.domElement.addEventListener("pointerup", () => (dragging = false));
 renderer.domElement.addEventListener("pointercancel", () => (dragging = false));
 function walk(dt) {
-  if (renderer.xr.isPresenting || !held.size) return;
+  if (renderer.xr.isPresenting || !held.size || director.phase === "running") return;
   const speed = 1.8 * dt;
   const fx = -Math.sin(yaw),
     fz = -Math.cos(yaw);
@@ -457,28 +712,39 @@ function desktopAim() {
   camera.getWorldDirection(aimDir);
   return aimedInteractable(aimOrigin, aimDir);
 }
+function activateInteractable(target) {
+  if (!target) return false;
+  if (target.id === "corridor-door") toggleDoor();
+  else target.onInteract();
+  return true;
+}
 function interact() {
   if (renderer.xr.isPresenting) return;
   const target = desktopAim();
   if (target) {
-    target.onInteract();
+    activateInteractable(target);
     toast(target.label);
   }
 }
 
 // ---------- in-world HUD and XR target panels ----------
+// Everything below lives in WORLD space (children of the scene, never of the
+// camera), so it never swims with the head in VR.
 function panel(width, height, canvasWidth, canvasHeight) {
   const canvas = document.createElement("canvas");
   canvas.width = canvasWidth;
   canvas.height = canvasHeight;
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(width, height),
     new THREE.MeshBasicMaterial({
       map: texture,
       transparent: true,
       side: THREE.DoubleSide,
+      depthWrite: false,
+      fog: false,
     }),
   );
   return { canvas, ctx: canvas.getContext("2d"), texture, mesh };
@@ -487,32 +753,49 @@ const hud = panel(1.65, 0.82, 1024, 512);
 hud.mesh.position.set(-1.3, 1.95, -1.25);
 hud.mesh.rotation.y = 0.25;
 scene.add(hud.mesh);
+function drawTarget(p, text, lit = false) {
+  const c = p.ctx;
+  c.clearRect(0, 0, 650, 160);
+  c.fillStyle = lit ? "#6d5a26" : "#243429";
+  c.fillRect(0, 0, 650, 160);
+  c.strokeStyle = lit ? "#e0b84f" : "#9aad86";
+  c.lineWidth = 4;
+  c.strokeRect(3, 3, 644, 154);
+  c.fillStyle = "#f1f5e8";
+  c.font = "bold 44px sans-serif";
+  c.textAlign = "center";
+  c.fillText(text, 325, 95);
+  p.texture.needsUpdate = true;
+}
 function target(text, x, action) {
   const p = panel(0.65, 0.16, 650, 160);
-  p.ctx.fillStyle = "#243429";
-  p.ctx.fillRect(0, 0, 650, 160);
-  p.ctx.strokeStyle = "#9aad86";
-  p.ctx.strokeRect(3, 3, 644, 154);
-  p.ctx.fillStyle = "#e0e9d3";
-  p.ctx.font = "38px sans-serif";
-  p.ctx.textAlign = "center";
-  p.ctx.fillText(text, 325, 95);
-  p.texture.needsUpdate = true;
+  drawTarget(p, text);
   p.mesh.position.set(x, 1.38, -1.05);
+  p.mesh.rotation.y = -x * 0.12; // gentle inward curve toward the player
   p.mesh.userData.action = action;
   scene.add(p.mesh);
   return p;
 }
-const startTarget = target("BEGIN / RESET", -0.4, () => {
+const startTarget = target("BEGIN / RESET", -1.05, () => {
   if (director.phase === "running") reset();
   else begin();
 });
-const soundTarget = target("SOUND: OFF", 0.4, () => setSound(!audioEnabled));
-const targets = [startTarget.mesh, soundTarget.mesh];
+const soundTarget = target("SOUND: OFF", -0.35, () => setSound(!audioEnabled));
+const camTarget = target("CAMERAS", 0.35, toggleCameras);
+const nextTarget = target("NEXT CAM", 1.05, nextCamera);
+const targets = [startTarget.mesh, soundTarget.mesh, camTarget.mesh, nextTarget.mesh];
+// Power readout lives on the cabinet by the CRT (never head-locked).
+const powerPanel = panel(0.62, 0.3, 512, 248);
+powerPanel.mesh.position.set(-2.1, 2.05, -3.45);
+powerPanel.mesh.lookAt(0, 1.7, 2);
+scene.add(powerPanel.mesh);
+
 const xrRotation = new THREE.Matrix4();
+const controllers = [];
 for (let i = 0; i < 2; i++) {
   const controller = renderer.xr.getController(i);
   rig.add(controller);
+  controllers.push(controller);
   const line = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(),
@@ -522,25 +805,68 @@ for (let i = 0; i < 2; i++) {
   );
   line.scale.z = 5;
   controller.add(line);
-  controller.addEventListener("selectstart", () => {
-    xrRotation.identity().extractRotation(controller.matrixWorld);
-    aimOrigin.setFromMatrixPosition(controller.matrixWorld);
-    aimDir.set(0, 0, -1).applyMatrix4(xrRotation);
-    raycaster.set(aimOrigin, aimDir);
-    raycaster.far = 20;
-    const panelHit = raycaster.intersectObjects(targets)[0];
-    if (panelHit) return panelHit.object.userData.action();
-    const interactable = aimedInteractable(aimOrigin, aimDir);
-    if (interactable) return interactable.onInteract();
-    if (director.phase !== "running") begin();
-  });
+  controller.addEventListener("selectstart", () => pointerSelect(controller));
+}
+function pointerSelect(controller) {
+  xrRotation.identity().extractRotation(controller.matrixWorld);
+  aimOrigin.setFromMatrixPosition(controller.matrixWorld);
+  aimDir.set(0, 0, -1).applyMatrix4(xrRotation);
+  raycaster.set(aimOrigin, aimDir);
+  raycaster.far = 20;
+  // Nearest of: UI panels, the CRT, interactable props.
+  const panelHit = raycaster.intersectObjects(targets)[0];
+  const crtHit = raycaster.intersectObject(monitor.group, true)[0];
+  raycaster.far = 4.5;
+  const propHit = raycaster.intersectObjects(interactableMeshes, true)[0];
+  const best = [
+    panelHit && { d: panelHit.distance, run: () => panelHit.object.userData.action() },
+    crtHit && {
+      d: crtHit.distance,
+      run: () => (monitor.isActive() ? nextCamera() : setCameras(true)),
+    },
+    propHit && {
+      d: propHit.distance,
+      run: () => {
+        let o = propHit.object;
+        while (o && !o.userData.interactableId) o = o.parent;
+        activateInteractable(o && byId[o.userData.interactableId]);
+      },
+    },
+  ]
+    .filter(Boolean)
+    .sort((a, b) => a.d - b.d)[0];
+  if (best) return best.run();
+  if (director.phase !== "running") begin();
 }
 const buttonDown = new Map();
 function controllerButtons() {
-  for (const source of renderer.xr.getSession()?.inputSources || []) {
-    const pressed = !!source.gamepad?.buttons[4]?.pressed;
-    if (pressed && !buttonDown.get(source)) setSound(!audioEnabled);
-    buttonDown.set(source, pressed);
+  let grip = false;
+  let gripController = null;
+  const sources = renderer.xr.getSession()?.inputSources || [];
+  sources.forEach((source, idx) => {
+    const b = source.gamepad?.buttons;
+    const a = !!b?.[4]?.pressed;
+    const y = !!b?.[5]?.pressed;
+    const sq = !!b?.[1]?.pressed;
+    const prev = buttonDown.get(source) || {};
+    if (a && !prev.a) setSound(!audioEnabled);
+    if (y && !prev.y) toggleCameras();
+    if (sq) {
+      grip = true;
+      gripController = controllers[idx] ?? gripController;
+    }
+    buttonDown.set(source, { a, y });
+  });
+  floodVR = grip;
+  if (gripController && floodlight.parent !== gripController) {
+    gripController.add(floodlight);
+    floodlight.position.set(0, 0, 0);
+  }
+}
+function attachFloodlightToCamera() {
+  if (floodlight.parent !== camera) {
+    camera.add(floodlight);
+    floodlight.position.set(0.08, -0.1, 0);
   }
 }
 renderer.xr.addEventListener("sessionstart", () => {
@@ -555,78 +881,115 @@ renderer.xr.addEventListener("sessionend", () => {
   camera.rotation.set(pitch, yaw, 0);
   if (director.phase !== "running") $("overlay").classList.remove("hidden");
   buttonDown.clear();
+  floodVR = false;
+  attachFloodlightToCamera();
 });
 
 function drawHud(s) {
   const ctx = hud.ctx;
+  const ps = power.getState();
   ctx.clearRect(0, 0, 1024, 512);
-  ctx.fillStyle = "#0d1916ed";
+  ctx.fillStyle = "#0b1412f2";
   ctx.fillRect(0, 0, 1024, 512);
-  ctx.strokeStyle = "#5f7655";
+  ctx.strokeStyle = "#7d9770";
+  ctx.lineWidth = 4;
   ctx.strokeRect(3, 3, 1018, 506);
   ctx.textAlign = "left";
   ctx.fillStyle = "#c6d7ad";
-  ctx.font = "32px sans-serif";
-  ctx.fillText("FOCUSED / THE QUIET ROOM", 38, 65);
-  ctx.fillStyle = "#e2e7dc";
-  ctx.font = "48px sans-serif";
+  ctx.font = "30px sans-serif";
+  ctx.fillText("FOCUSED / THE QUIET ROOM", 36, 56);
+  ctx.fillStyle = "#f2f5ec";
+  ctx.font = "bold 52px sans-serif";
   ctx.fillText(
-    `${s.state}${s.paused ? " (PAUSED)" : ""}    ${Math.ceil(s.remaining)}s`,
-    38,
-    140,
+    `${s.state}${s.paused ? " (PAUSED)" : ""}   ${Math.ceil(s.remaining)}s`,
+    36,
+    122,
   );
   ctx.font = "30px sans-serif";
   const mode = client.stats().mode ?? "manual";
   const src = mode === "live" ? s.source : mode;
   ctx.fillText(
-    `SOURCE: ${src.toUpperCase()}${src === "hardware" ? " (bridge-reported)" : " / DEMO"}`,
-    38,
-    205,
+    `SOURCE ${src.toUpperCase()}${src === "hardware" ? " (bridge-reported)" : " / DEMO"}`,
+    36,
+    175,
   );
   ctx.fillText(
-    `INPUT ${s.intensity.toFixed(2)}    TENSION ${s.tension.toFixed(2)}`,
-    38,
-    260,
+    `INPUT ${s.intensity.toFixed(2)}   TENSION ${s.tension.toFixed(2)}   Q ${s.quality.toFixed(2)}`,
+    36,
+    222,
   );
+  const tier = powerTier(ps.percent, ps.blackout);
+  ctx.fillStyle = tier === "ok" ? "#b8d9a0" : tier === "warning" ? "#e8c05a" : "#f08a72";
+  ctx.font = "bold 36px sans-serif";
   ctx.fillText(
-    `QUALITY ${s.quality.toFixed(2)}    ${s.fresh ? "FRESH" : "NO FRESH SIGNAL"}${s.encounter ? `    [${s.encounter.id}]` : ""}`,
-    38,
-    315,
+    ps.blackout ? "POWER OUT" : `POWER ${ps.percent}%${monitor.isActive() ? "  CAMS" : ""}${floodOn() ? "  LIGHT" : ""}${doorSealed ? "  DOOR" : ""}`,
+    36,
+    276,
   );
-  ctx.fillStyle = "#9eaf98";
-  ctx.font = "25px sans-serif";
-  ctx.fillText(
+  ctx.fillStyle = hudNote.until > performance.now() / 1000 ? "#f0c27a" : "#9eaf98";
+  ctx.font = "27px sans-serif";
+  const hint =
     s.phase === "ended"
-      ? "Complete. Point at BEGIN / RESET to try again."
+      ? s.endedReason === "caught"
+        ? "CAUGHT. Point at BEGIN / RESET to try again."
+        : "You survived. Point at BEGIN / RESET to replay."
       : s.phase === "ready"
-        ? "Point and trigger BEGIN. A/X toggles sound."
-        : "Trigger buttons or props. A/X toggles sound.",
-    38,
-    385,
-  );
-  ctx.fillText(
-    s.state === "WAIT"
-      ? "Waiting: atmosphere eases off."
-      : `Sound ${audioEnabled ? "ON" : "OFF"} - Experimental response proxy`,
-    38,
-    438,
-  );
+        ? "Point + trigger BEGIN. A/X sound. B/Y cameras. Grip = floodlight."
+        : hudNote.until > performance.now() / 1000
+          ? hudNote.text
+          : "Watch the Attendant. Face the ghost. Save power.";
+  wrapText(ctx, hint, 36, 335, 950, 34);
+  ctx.fillStyle = "#8fa08a";
+  ctx.font = "24px sans-serif";
+  ctx.fillText(`Sound ${audioEnabled ? "ON" : "OFF"} - experimental response proxy`, 36, 470);
   hud.texture.needsUpdate = true;
-  soundTarget.ctx.clearRect(0, 0, 650, 160);
-  soundTarget.ctx.fillStyle = "#243429";
-  soundTarget.ctx.fillRect(0, 0, 650, 160);
-  soundTarget.ctx.fillStyle = "#e0e9d3";
-  soundTarget.ctx.textAlign = "center";
-  soundTarget.ctx.font = "38px sans-serif";
-  soundTarget.ctx.fillText(`SOUND: ${audioEnabled ? "ON" : "OFF"}`, 325, 95);
-  soundTarget.texture.needsUpdate = true;
+
+  drawTarget(soundTarget, `SOUND: ${audioEnabled ? "ON" : "OFF"}`, audioEnabled);
+  drawTarget(camTarget, monitor.isActive() ? "CAMERAS: UP" : "CAMERAS", monitor.isActive());
+  drawTarget(nextTarget, monitor.isActive() ? monitor.getCamera().label?.split("—")[0].trim() ?? "NEXT CAM" : "NEXT CAM");
+  drawTarget(startTarget, director.phase === "running" ? "RESET" : "BEGIN", false);
+
+  // Power panel by the CRT.
+  const c = powerPanel.ctx;
+  c.fillStyle = "#070b0bef";
+  c.fillRect(0, 0, 512, 248);
+  c.strokeStyle = tier === "ok" ? "#6c8a5f" : tier === "warning" ? "#c9a040" : "#c8553f";
+  c.lineWidth = 4;
+  c.strokeRect(3, 3, 506, 242);
+  c.textAlign = "left";
+  c.fillStyle = "#cfd8c4";
+  c.font = "bold 28px monospace";
+  c.fillText("SECURITY POWER", 22, 46);
+  c.font = "bold 78px monospace";
+  c.fillStyle = tier === "ok" ? "#b8d9a0" : tier === "warning" ? "#e8c05a" : "#f08a72";
+  c.fillText(ps.blackout ? "OUT" : `${ps.percent}%`, 22, 128);
+  c.fillStyle = "#1a2220";
+  c.fillRect(22, 150, 468, 26);
+  c.fillStyle = c.fillStyle = tier === "ok" ? "#8fb07a" : tier === "warning" ? "#d9a648" : "#d4644a";
+  c.fillRect(22, 150, 468 * (ps.blackout ? 0 : ps.level), 26);
+  c.fillStyle = "#cfd8c4";
+  c.font = "26px monospace";
+  const cam = monitor.getCamera();
+  c.fillText(monitor.isActive() ? cam.label ?? "CAM --" : "CAMERAS DOWN", 22, 214);
+  powerPanel.texture.needsUpdate = true;
+}
+function wrapText(ctx, text, x, y, maxW, lh) {
+  const words = text.split(" ");
+  let line = "";
+  for (const w of words) {
+    const t = line ? `${line} ${w}` : w;
+    if (ctx.measureText(t).width > maxW && line) {
+      ctx.fillText(line, x, y);
+      line = w;
+      y += lh;
+    } else line = t;
+  }
+  if (line) ctx.fillText(line, x, y);
 }
 
 // ---------- encounter -> entity routing ----------
 let lastEncounterKey = null;
-let lampFlicker = 0;
 function routeEncounter(s) {
-  const key = s.encounter ? `${s.encounter.id}:${s.encounter.t <= 0.2}` : null;
   if (!s.encounter) {
     lastEncounterKey = null;
     return;
@@ -635,14 +998,168 @@ function routeEncounter(s) {
   if (!fresh) return;
   lastEncounterKey = s.encounter.id;
   const e = s.encounter;
-  if (e.id === "lamp-flicker") lampFlicker = 1.6;
-  if (e.id === "door-creak") byId["corridor-door"]?.onInteract();
+  if (e.id === "lamp-flicker") {
+    atmosphere.flicker(0.5, 1.6, "stutter");
+    cue("lightFlicker", { intensity: 0.4 });
+  }
+  if (e.id === "door-creak" && !doorSealed) byId["corridor-door"]?.onInteract();
   if (e.id === "radio-static") {
     const radio = byId.radio;
     if (radio && !radio.mesh.userData.active) radio.onInteract();
   }
-  if (e.intensity >= 0.85) attendant.trigger("advance");
-  if (e.intensity >= 0.97 && s.tension > 0.8) attendant.trigger("scare");
+  // The Attendant is moved ONLY by the hunt coordinator (unobserved rule).
+}
+
+// ---------- hunt / power / scare event handling ----------
+const entityPos = (id) => {
+  const g = id === "ghost" ? ghost.group : attendant.group;
+  return { x: g.position.x, z: g.position.z };
+};
+function entityByName(id) {
+  return id === "ghost" ? ghost : attendant;
+}
+let attendantTargetWp = 0;
+function onHauntEvent(ev) {
+  switch (ev.type) {
+    case "move": {
+      if (ev.entity === "attendant") {
+        attendantTargetWp = ev.waypoint;
+        attendant.trigger("advance");
+        stats.noteMove("attendant");
+        if (monitor.getWatchedZone() === attendantZone(ev.waypoint)) {
+          monitor.staticBurst(0.7);
+          cue("static", { intensity: 0.5 });
+          notice("CAMERA INTERFERENCE: something moved on the feed.", { alert: true, seconds: 3 });
+        }
+      }
+      lampMotes.agitate(0.6);
+      break;
+    }
+    case "stage":
+      if (ev.entity === "attendant" && (ev.stage === "retreat" || ev.stage === "reset"))
+        attendantTargetWp = ev.waypoint ?? 0;
+      if (ev.stage === "manifest" && ev.entity === "ghost") {
+        if (ghost.state === "hidden") ghost.setState("apparition");
+        stats.noteMove("ghost");
+        if (monitor.getWatchedZone() === "doorway") {
+          monitor.staticBurst(0.7);
+          cue("static", { intensity: 0.5 });
+        }
+        environment.creakDoor(doorSealed ? 0 : 0.2);
+        notice("Something is standing in the corridor. Keep your eyes on it.", { alert: true });
+      }
+      break;
+    case "cue":
+      if (ev.cue === "stinger") break; // the scare flow times its own stinger
+      cue(ev.cue, { position: ev.entity ? entityPos(ev.entity) : undefined, intensity: ev.cue === "eyes" ? 0.7 : 0.75 });
+      break;
+    case "jumpscare": {
+      stats.noteJumpscare(ev, current.elapsed);
+      applyFlow(flow.trigger(ev));
+      break;
+    }
+    default:
+      break;
+  }
+}
+function applyFlow(actions) {
+  for (const a of actions) {
+    switch (a.type) {
+      case "duck":
+        audio.duck(a.seconds + 0.2);
+        musicBox.hardCut();
+        break;
+      case "lightsCut":
+        atmosphere.lightsCut(a.seconds); // the ONE cut-to-dark of this scare
+        lampMotes.agitate(1);
+        break;
+      case "lunge":
+        if (a.entity === "ghost") ghost.trigger("rush");
+        else attendant.trigger("jumpscare");
+        break;
+      case "stinger":
+        cue("stinger", { intensity: 1 });
+        break;
+      case "end":
+        director.end("caught");
+        break;
+    }
+  }
+}
+function onPowerEvent(e) {
+  switch (e.type) {
+    case "warning":
+      notice("POWER 20%. Cameras and floodlight are draining it.", { alert: true });
+      cue("powerWarning");
+      break;
+    case "critical":
+      notice("POWER 10%. Conserve everything.", { alert: true });
+      cue("powerCritical");
+      break;
+    case "flicker":
+      atmosphere.flicker(0.55, 0.9, "sag");
+      cue("lightFlicker", { intensity: 0.5 });
+      lampMotes.agitate(0.3);
+      break;
+    case "blackout":
+      monitor.setActive(false);
+      monitor.setSignalLost(true);
+      setDoor(false, true);
+      floodDesk = floodVR = false;
+      stats.blackoutAt = current.elapsed;
+      cue("blackout", { intensity: 0.9 });
+      notice("POWER OUT. Do not move. Do not look away.", { alert: true, seconds: 8 });
+      break;
+  }
+}
+function onBlackoutBeat(name) {
+  if (name === "dark") {
+    atmosphere.setBlackout(true);
+    musicBox.setWind(0);
+    windLocked = true;
+    lampMotes.agitate(1);
+  } else if (name === "musicBox") {
+    musicBox.setMuffled(true);
+    musicBox.setWind(0.45); // a distant, wheezing box from behind a wall
+  } else if (name === "eyes") {
+    attendant.setBlackout(true);
+    ghost.setBlackout(true);
+    haunt.notify("blackout");
+  }
+}
+function onSessionEnded() {
+  endHandled = true;
+  stats.powerAtEnd = power.getState().percent;
+  power.stop();
+  floodDesk = floodVR = false;
+  if (current.endedReason !== "caught") {
+    atmosphere.setBlackout(false);
+    attendant.setBlackout(false);
+    ghost.setBlackout(false);
+    haunt.notify("blackout-end");
+    musicBox.setMuffled(false);
+    musicBox.setWind(1);
+    windLocked = false;
+  }
+}
+
+// ---------- observation ----------
+const headPos = new THREE.Vector3();
+const headQuat = new THREE.Quaternion();
+const headCam = { position: headPos, quaternion: headQuat };
+function headPose() {
+  if (renderer.xr.isPresenting) renderer.xr.updateCamera(camera);
+  camera.updateWorldMatrix(true, false);
+  camera.getWorldPosition(headPos);
+  camera.getWorldQuaternion(headQuat);
+  return headCam;
+}
+const tgt = { x: 0, y: 0, z: 0 };
+function coneSees(head, group) {
+  tgt.x = group.position.x;
+  tgt.y = group.position.y + 1.1;
+  tgt.z = group.position.z;
+  return focusObserved(head, tgt);
 }
 
 // ---------- stats ----------
@@ -650,20 +1167,20 @@ let fpsAccum = 0,
   fpsFrames = 0,
   fpsValue = 0;
 function updateStats(s) {
-  const stats = client.stats();
+  const stats2 = client.stats();
   $("sourceStat").textContent = (
-    stats.mode === "live" ? s.source : (stats.mode ?? "manual")
+    stats2.mode === "live" ? s.source : (stats2.mode ?? "manual")
   ).toUpperCase();
   $("stateStat").textContent = s.paused ? `${s.state} ⏸` : s.state;
   $("tensionStat").textContent = s.tension.toFixed(2);
   $("qualityStat").textContent = s.quality.toFixed(2);
   $("encounterStat").textContent = s.encounter ? s.encounter.id : "–";
   $("fpsStat").textContent = fpsValue ? fpsValue.toFixed(0) : "–";
-  $("rateStat").textContent = `${stats.receiveRate.toFixed(1)} Hz`;
+  $("rateStat").textContent = `${stats2.receiveRate.toFixed(1)} Hz`;
   $("signalAgeStat").textContent =
-    stats.lastSignalAgeMs == null
+    stats2.lastSignalAgeMs == null
       ? "–"
-      : `${(stats.lastSignalAgeMs / 1000).toFixed(1)}s`;
+      : `${(stats2.lastSignalAgeMs / 1000).toFixed(1)}s`;
   const sec = Math.ceil(s.remaining);
   $("timeStat").textContent =
     `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
@@ -671,15 +1188,50 @@ function updateStats(s) {
   $("progressBar").querySelector(".progress-fill").style.width =
     `${(s.progress * 100).toFixed(1)}%`;
   $("connection").textContent =
-    stats.mode === "live"
+    stats2.mode === "live"
       ? `Relay ${connectionStatus.connection} · ${s.fresh ? "receiving" : "waiting for fresh input"}`
-      : `${(stats.mode ?? "manual").toUpperCase()} DEMO · no hardware claim`;
+      : `${(stats2.mode ?? "manual").toUpperCase()} DEMO · no hardware claim`;
+
+  // Power + camera dock
+  const ps = power.getState();
+  const tier = powerTier(ps.percent, ps.blackout);
+  $("powerPct").textContent = ps.blackout ? "OUT" : `${ps.percent}%`;
+  $("powerStat").textContent = ps.blackout ? "OUT" : `${ps.percent}%`;
+  $("powerFill").style.width = `${ps.blackout ? 0 : ps.percent}%`;
+  $("powerBar").dataset.tier = tier;
+  $("powerDock").dataset.tier = tier;
+  $("powerBar").setAttribute("aria-valuenow", ps.percent);
+  $("powerEta").textContent = ps.blackout
+    ? "POWER OUT"
+    : formatEta(ps.secondsRemaining, s.remaining, powerScale);
+  $("loadMonitor").classList.toggle("on", ps.activeLoads.includes("monitor"));
+  $("loadFlood").classList.toggle("on", ps.activeLoads.includes("floodlight"));
+  $("loadDoor").classList.toggle("on", ps.activeLoads.includes("door"));
+  const up = monitor.isActive();
+  const cam = monitor.getCamera();
+  $("camToggle").setAttribute("aria-pressed", String(up));
+  $("floodBtn").setAttribute("aria-pressed", String(floodOn()));
+  $("doorBtn").setAttribute("aria-pressed", String(doorSealed));
+  for (const b of document.querySelectorAll("#camButtons button")) {
+    b.disabled = !up;
+    b.classList.toggle("sel", up && b.dataset.cam !== undefined && +b.dataset.cam === cam.index);
+  }
+  $("camLabel").textContent = ps.blackout ? "SIGNAL LOST: POWER OUT" : up ? (cam.label ?? "NO SIGNAL") : "CAMERAS DOWN";
+  $("camStat").textContent = ps.blackout ? "LOST" : up ? `CAM ${cam.index + 1}` : "DOWN";
+
+  const hs = haunt.snapshot();
+  const att = hs.entities.attendant;
+  const gh = hs.entities.ghost;
+  $("attendantStat").textContent = `${att.waypoint}/${att.waypoints - 1}${attendant.observed ? " seen" : ""}`;
+  $("ghostStat").textContent = `${Math.round(gh.charge * 100)}%${ghost.observed ? " seen" : ""}`;
+  $("aiStat").textContent = `${att.aggression}→${att.effective.toFixed(1)}`;
 }
 
 // ---------- render loop ----------
 let lastTime = performance.now(),
   lastHud = 0,
   lastAim = 0;
+let floodLevel = 0;
 renderer.setAnimationLoop((time) => {
   const now = performance.now() / 1000,
     dt = Math.min(0.1, Math.max(0, (performance.now() - lastTime) / 1000));
@@ -692,9 +1244,9 @@ renderer.setAnimationLoop((time) => {
     fpsFrames = 0;
   }
   current = director.step(dt, now);
-  const active = current.phase === "running" && !current.paused,
+  const running = current.phase === "running" && !current.paused,
+    active = running,
     t = active ? current.tension : 0;
-  const safe = active && current.state !== "WAIT";
   const visuals = {
     tension: t,
     state: current.state,
@@ -708,30 +1260,110 @@ renderer.setAnimationLoop((time) => {
     xrPresenting: renderer.xr.isPresenting,
   };
   walk(dt);
-  environment.update(dt, time / 1000, visuals);
-  atmosphere.update(dt, time / 1000, visuals);
-  attendant.update(dt, time / 1000, active ? visuals : { ...visuals, tension: 0, state: "WAIT" });
-  ghost.update(dt, time / 1000, visuals);
-  monitor.update(dt, time / 1000, visuals);
-  if (lampFlicker > 0) {
-    lampFlicker = Math.max(0, lampFlicker - dt);
-    lamp.intensity *= 0.35 + 0.65 * Math.abs(Math.sin(time * 0.05));
+
+  // --- simulation (only while a session is running and not paused) ---
+  const head = headPose();
+  const ghostVisible = ghost.group.visible && ghost.state !== "hidden";
+  const watched = monitor.getWatchedZone();
+  const ghostSeen = entityObserved({
+    camObserved: coneSees(head, ghost.group),
+    watchedZone: watched,
+    zone: ghostZone(ghost.group.position.z),
+    visible: ghostVisible,
+  });
+  const observed = {
+    attendant: entityObserved({
+      camObserved: coneSees(head, attendant.group),
+      watchedZone: watched,
+      zone: attendantZone(meshWaypoint()),
+    }),
+    // a sealed door holds the corridor back: the ghost's charge drains
+    ghost: ghostSeen || (doorSealed && running),
+  };
+  attendant.setObserved(observed.attendant);
+  ghost.setObserved(ghostSeen);
+  const blackoutNow = power.getState().blackout;
+  if (running) {
+    // power
+    power.setLoad("floodlight", floodOn());
+    power.update(dt * powerScale);
+    for (const e of power.consumeEvents()) onPowerEvent(e);
+    const ps = power.getState();
+    for (const b of blackoutTimeline.step(ps.blackout, ps.blackoutElapsed * (1 / powerScale)))
+      onBlackoutBeat(b);
+    if (!windLocked) musicBox.setWind(Math.min(1, power.getLevel() / 0.5));
+    stats.tick(dt, { monitorUp: monitor.isActive(), floodlightOn: floodOn() });
+    // tape briefing + phantom audio-only sounds
+    for (const line of tape.due(current.elapsed)) {
+      notice(line, { seconds: 5.5 });
+      cue("static", { intensity: 0.25 });
+    }
+    const ph = phantom.update(dt, {
+      tension: t,
+      state: current.state,
+      blackout: blackoutNow,
+      scared: flow.phase !== "idle" || haunt.ended,
+    });
+    if (ph) {
+      cue(ph.cue, { position: ph.position, intensity: ph.intensity });
+      lampMotes.agitate(0.15);
+    }
+    // hunt: setObserved -> update -> consume events -> entity update
+    haunt.update(dt, {
+      tension: t,
+      state: current.state,
+      elapsed: current.elapsed,
+      observed,
+    });
+    for (const ev of haunt.consumeEvents()) onHauntEvent(ev);
+    applyFlow(flow.update(dt));
   }
+  // The mesh follows the model backwards (retreat/reset) once nobody watches.
+  if (running && attendantTargetWp < meshWaypoint() && !attendant.jumping && !observed.attendant && flow.phase === "idle")
+    buildAttendant(attendantTargetWp);
+  if (!running && current.phase !== "running" && attendantTargetWp !== 0 && flow.phase === "idle") attendantTargetWp = 0;
+
+  const tAbs = time / 1000;
+  environment.update(dt, tAbs, visuals);
+  atmosphere.update(dt, tAbs, visuals);
+  attendant.update(dt, tAbs, active ? visuals : { ...visuals, tension: 0, state: "WAIT" });
+  ghost.update(dt, tAbs, visuals);
+  // Monitor feed: three.js re-targets to the XR camera whenever xr.enabled is
+  // true, so disable it around the monitor's own render-target pass.
+  const xrWas = renderer.xr.enabled;
+  renderer.xr.enabled = false;
+  monitor.update(dt, tAbs, visuals);
+  renderer.xr.enabled = xrWas;
+
+  // Floodlight (hold-to-use): attach to camera on desktop, controller in VR.
+  if (!renderer.xr.isPresenting) attachFloodlightToCamera();
+  floodLevel += ((floodOn() ? 1 : 0) - floodLevel) * Math.min(1, dt * 12);
+  floodlight.intensity = 55 * floodLevel;
+  const dark = 1 - atmosphere.blackLevel;
   lampCone.updateFrom(lamp);
-  lampCone.setIntensity(visuals.lighting ? 0.35 + 0.4 * (1 - t) : 0.5);
+  const coneI = (visuals.lighting ? 0.35 + 0.4 * (1 - t) : 0.5) * dark;
+  lampCone.setIntensity(coneI);
+  lampMotes.setIntensity(coneI);
+  lampMotes.update(dt);
   routeEncounter(current);
   if (current.phase === "ended") {
     $("position").disabled = false;
+    if (!endHandled) onSessionEnded();
     if (!summaryShown) {
       summaryShown = true;
       $("crosshair").classList.add("hidden");
       $("interactHint").classList.add("hidden");
-      setState("The room settles. Experience complete.");
+      setState(
+        current.endedReason === "caught"
+          ? "Caught. Press Reset to try again."
+          : "The room settles. Experience complete.",
+      );
       if (!renderer.xr.isPresenting) showSummary();
     }
   }
   hud.mesh.visible = renderer.xr.isPresenting;
   targets.forEach((m) => (m.visible = renderer.xr.isPresenting));
+  powerPanel.mesh.visible = monitor.isActive() || renderer.xr.isPresenting || running;
   if (renderer.xr.isPresenting) controllerButtons();
   audio.update(current, renderer.xr.isPresenting ? renderer.xr.getCamera() : camera);
   musicBox.update(current);
@@ -739,7 +1371,11 @@ renderer.setAnimationLoop((time) => {
     lastAim = time;
     const aimed = desktopAim();
     $("interactHint").classList.toggle("hidden", !aimed);
-    if (aimed) $("interactHint").textContent = `Press E — ${aimed.label}`;
+    if (aimed)
+      $("interactHint").textContent =
+        aimed.id === "corridor-door"
+          ? `Press E: ${doorSealed ? "open" : "seal"} the door`
+          : `Press E — ${aimed.label}`;
   }
   if (time - lastHud > 150) {
     lastHud = time;
@@ -748,6 +1384,38 @@ renderer.setAnimationLoop((time) => {
   }
   renderer.render(scene, camera);
 });
+window.__quiet = {
+  director,
+  haunt,
+  power,
+  monitor,
+  flow,
+  stats,
+  atmosphere,
+  floodlight,
+  camera,
+  rig,
+  get attendant() {
+    return attendant;
+  },
+  ghost,
+  renderer,
+  scene,
+  get doorSealed() {
+    return doorSealed;
+  },
+  get floodOn() {
+    return floodOn();
+  },
+  get audioEnabled() {
+    return audioEnabled;
+  },
+  setLook(y, p = 0) {
+    yaw = y;
+    pitch = p;
+    camera.rotation.set(pitch, yaw, 0);
+  },
+};
 window.addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();

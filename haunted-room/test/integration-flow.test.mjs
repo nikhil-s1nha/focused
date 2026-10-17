@@ -27,9 +27,9 @@ test("zone map covers every waypoint node and matches default camera zones", () 
   assert.equal(ATTENDANT_NODE_COUNT, ATTENDANT_PATH.length + 1);
   const cams = new Set(["far-corner", "doorway", "cabinet", "rear"]);
   for (const z of ATTENDANT_ZONES) assert.ok(cams.has(z), z);
-  assert.equal(attendantZone(0), "cabinet");
+  assert.equal(attendantZone(0), "rear");
   assert.equal(attendantZone(99), "rear", "clamped");
-  assert.equal(attendantZone(NaN), "cabinet");
+  assert.equal(attendantZone(NaN), "rear");
   assert.equal(ghostZone(-7), "doorway");
   assert.equal(ghostZone(-2), "far-corner");
   assert.equal(ghostZone(1), "rear");
@@ -208,4 +208,54 @@ test("e2e: blackout sequence -> blackout jumpscare 13 s after the grid dies", ()
   assert.deepEqual(beats.map((b) => b[0]), ["dark", "musicBox", "eyes"]);
   const total = scareAt - darkAt;
   assert.ok(total > 12.5 && total < 14, `blackout scare ${total.toFixed(1)}s after dark`);
+});
+
+test("attendant bearings are outside the focus cone of the ghost's bearing (exclusive watch)", async () => {
+  const { FOCUS_HALF_ANGLE, focusObserved } = await import("../public/session-flow.mjs");
+  const cam = { position: { x: 0, y: 1.6, z: 2 }, forward: { x: 0, y: 0, z: -1 } };
+  const ghost = { x: 0, y: 1.1, z: -7 };
+  assert.equal(focusObserved(cam, ghost), true);
+  for (const p of ATTENDANT_PATH) {
+    assert.equal(focusObserved(cam, { x: p.x, y: 1.1, z: p.z }), false, `${p.x},${p.z} not seen while facing the ghost`);
+    // turn to face this node: ghost leaves the cone
+    const dx = p.x, dz = p.z - 2, d = Math.hypot(dx, dz);
+    const face = { position: cam.position, forward: { x: dx / d, y: 0, z: dz / d } };
+    assert.equal(focusObserved(face, { x: p.x, y: 1.1, z: p.z }), true);
+    assert.equal(focusObserved(face, ghost), false, "facing the node means ignoring the ghost");
+  }
+  assert.ok(FOCUS_HALF_ANGLE < Math.PI / 6);
+});
+
+test("TapeScript delivers each line once, in order", async () => {
+  const { TapeScript, TAPE_SCRIPT } = await import("../public/session-flow.mjs");
+  const t = new TapeScript();
+  assert.deepEqual(t.due(0.5), []);
+  assert.equal(t.due(2).length, 1);
+  assert.equal(t.due(2).length, 0);
+  assert.equal(t.due(1000).length, TAPE_SCRIPT.length - 1);
+  t.reset();
+  assert.equal(t.due(1000).length, TAPE_SCRIPT.length);
+});
+
+test("PhantomSounds: deterministic, tension squeezes the gap, silent in blackout/relief/scare", async () => {
+  const { PhantomSounds } = await import("../public/session-flow.mjs");
+  const mk = () => {
+    let s = 7;
+    return new PhantomSounds({ rng: () => ((s = (s * 48271) % 2147483647) / 2147483647) });
+  };
+  const run = (p, tension, extra = {}) => {
+    const out = [];
+    for (let i = 0; i < 20 * 120; i++) {
+      const r = p.update(0.05, { tension, state: "BUILD", ...extra });
+      if (r) out.push(r);
+    }
+    return out;
+  };
+  const calm = run(mk(), 0), tense = run(mk(), 1);
+  assert.ok(calm.length >= 3 && tense.length > calm.length, `${calm.length} vs ${tense.length}`);
+  assert.deepEqual(run(mk(), 0), calm, "deterministic");
+  for (const p of calm) assert.ok(["knock", "footstep", "thump", "breath"].includes(p.cue));
+  assert.equal(run(mk(), 1, { blackout: true }).length, 0);
+  assert.equal(run(mk(), 1, { scared: true }).length, 0);
+  assert.equal(run(mk(), 1, { state: "RELIEF" }).length, 0);
 });

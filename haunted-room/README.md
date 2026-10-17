@@ -132,3 +132,19 @@ Actual Quest acceptance remains manual:
 0:00 — show input/source/HUD, enter VR and begin. 0:15 — use low manual input or the actual available source; explain it honestly. 0:45 — show lighting/fog/shadow change. 1:00 — hold high input and show RELIEF. 1:25 — stop the synthetic/live publisher and show WAIT. 1:40 — restore input. 2:00 — show the ending. Capture the headset's view; no slide deck is needed.
 
 References: [Three.js VR](https://threejs.org/manual/pages/how-to-create-vr-content.html), [WebXR secure context](https://developer.mozilla.org/en-US/docs/Web/API/WebXR_Device_API), [Android local server forwarding](https://developer.android.com/develop/ui/views/layout/webapps/access-local-server).
+
+## FNAF-style loop (wired in app.mjs)
+
+Begin, then: the Attendant creeps along the left wall and only moves while it is
+not in the centre of your view (26 degree focus cone) and its camera zone is not
+being watched. The corridor ghost is the opposite: ignore it and it charges,
+stare it down and it drains. Cameras (C, V/Tab, 1-4 buttons), the floodlight
+(hold L / VR grip) and the door seal (X) all drain power. At 0% the lights die,
+the music box winds down, eyes appear, then a scare. A scare is a ~0.8 s
+telegraph (duck + one cut-to-dark), the lunge + stinger, then a "caught" summary.
+Desktop walking is disabled while a session runs. Comfort rules: the camera is
+never moved, no flicker above ~2.5 Hz, sound is opt-in.
+
+VR controls (emulation-tested only for session entry and a generic select; NOT
+yet verified per-control, and never on a physical Quest): trigger = panels / CRT
+(cycles cameras) / door / props, A/X sound, B/Y cameras, grip floodlight.
