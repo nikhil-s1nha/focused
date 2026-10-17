@@ -233,7 +233,7 @@ export class FnafSession {
       if (e.type === "phone-call-end") continue; // PhoneCall owns call length
       const c = normalizeEvent(this.mode, e);
       if (!c) continue;
-      if (c.kind === "phone-start") this.startPhone(c.night ?? this.night, c.id);
+      if (c.kind === "phone-start") this.startPhone(c.night ?? this.night, c.id, false);
       if (c.kind === "jumpscare") {
         this.lastScare = { who: c.who, reason: c.reason, mode: this.mode, at: this.clock };
         this.interruptPhone();
@@ -242,11 +242,15 @@ export class FnafSession {
     }
   }
 
-  startPhone(night, id) {
-    if (this.phone?.snapshot().active) return;
+  // Starts the PhoneCall player. `announce` queues a phone-start event for
+  // the scene (sound); collect() passes false because it queues the event itself.
+  startPhone(night, id, announce = true) {
+    if (this.phone?.snapshot().active) return false;
     this.phone = new PhoneCall({ mode: this.mode, night: Number(night) || 1 });
     this.phone.start();
+    if (announce) this.canonical.push({ mode: this.mode, kind: "phone-start", id: id ?? `night${night}`, night: Number(night) || 1 });
     this.collectPhone();
+    return true;
   }
 
   tickPhone(dt) {
@@ -264,6 +268,7 @@ export class FnafSession {
   }
 
   // Test-panel and UI helpers that go through the same engine events.
+  callPhone(night = this.night) { return this.startPhone(night, null, true); }
   skipPhone() { const r = this.phone?.skip() ?? false; this.collectPhone(); return r; }
   interruptPhone() { const r = this.phone?.interrupt() ?? false; this.collectPhone(); return r; }
   togglePhoneMute() { if (this.phone) this.phone.setMuted(!this.phone.muted); }

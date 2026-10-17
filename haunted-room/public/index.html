@@ -55,6 +55,9 @@
         >
           Help
         </button>
+        <button id="modeToggle" type="button" aria-expanded="false" aria-controls="modeMenu">
+          Mode <span id="modeLabel">Room</span>
+        </button>
         <button
           id="consoleToggle"
           type="button"
@@ -117,7 +120,7 @@
         <span id="loadMonitor" class="pip">CAMS</span>
         <span id="loadFlood" class="pip">LIGHT</span>
       </div>
-      <div class="dock-row">
+      <div class="dock-row room-only">
         <button id="camToggle" type="button" aria-pressed="false" title="Toggle cameras (C)">
           Cameras <kbd>C</kbd>
         </button>
@@ -125,20 +128,102 @@
           Floodlight <kbd>L</kbd>
         </button>
       </div>
-      <div class="dock-row">
+      <div class="dock-row room-only">
         <button id="doorBtn" type="button" aria-pressed="false" title="Seal the corridor door (X). Costs power.">
           Seal door <kbd>X</kbd>
         </button>
         <span id="loadDoor" class="pip">DOOR</span>
       </div>
-      <div id="camButtons" class="dock-row cams" role="group" aria-label="Camera select">
+      <div id="camButtons" class="dock-row cams room-only" role="group" aria-label="Camera select">
         <button type="button" data-cam="0" disabled>1</button>
         <button type="button" data-cam="1" disabled>2</button>
         <button type="button" data-cam="2" disabled>3</button>
         <button type="button" data-cam="3" disabled>4</button>
         <button id="camNext" type="button" disabled title="Next camera (V)">Next <kbd>V</kbd></button>
       </div>
-      <div id="camLabel" class="dock-cam mono">CAMERAS DOWN</div>
+      <div id="camLabel" class="dock-cam mono room-only">CAMERAS DOWN</div>
+    </section>
+
+    <!-- Mode menu (hidden by default). The room is the default experience. -->
+    <section id="modeMenu" class="panel mode-menu hidden" role="dialog" aria-labelledby="modeTitle">
+      <h2 id="modeTitle">Mode</h2>
+      <div class="btn-col">
+        <button type="button" data-mode="room" class="primary">Room (default)</button>
+        <button type="button" data-mode="fnaf1">Night Shift &middot; FNAF 1 style</button>
+        <button type="button" data-mode="fnaf2">Mask Night &middot; FNAF 2 style</button>
+        <button type="button" data-mode="fnaf3">Vent Night &middot; FNAF 3 style</button>
+        <button type="button" data-mode="fnaf4">The Bedroom &middot; FNAF 4 style</button>
+      </div>
+      <div class="field">
+        <label for="nightSelect">Night</label>
+        <select id="nightSelect">
+          <option value="1">Night 1</option><option value="2">Night 2</option><option value="3">Night 3</option>
+          <option value="4">Night 4</option><option value="5">Night 5</option><option value="6">Night 6</option>
+        </select>
+      </div>
+      <p class="console-note">Original characters and rules, inspired by the FNAF formula. Not affiliated with any game.</p>
+    </section>
+
+    <!-- Hidden test panel: T key or ?test=1. Each button runs the real game path. -->
+    <section id="testPanel" class="panel test-panel hidden" role="dialog" aria-labelledby="testTitle">
+      <h2 id="testTitle">Scare test panel</h2>
+      <div class="field">
+        <label for="testMode">Mode for FNAF tests</label>
+        <select id="testMode">
+          <option value="fnaf1">FNAF 1 style</option>
+          <option value="fnaf2">FNAF 2 style</option>
+          <option value="fnaf3">FNAF 3 style</option>
+          <option value="fnaf4">FNAF 4 style</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="testNight">Night</label>
+        <select id="testNight">
+          <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+          <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+        </select>
+      </div>
+      <fieldset class="test-group">
+        <legend>Room scares</legend>
+        <button type="button" data-test="room-jumpscare">Attendant jumpscare (full)</button>
+        <button type="button" data-test="room-ghost">Ghost rush (full)</button>
+        <button type="button" data-test="room-lunge-only">Attendant lunge only</button>
+      </fieldset>
+      <fieldset class="test-group">
+        <legend>Monitor and power</legend>
+        <button type="button" data-test="static-burst">Camera static burst</button>
+        <button type="button" data-test="signal-lost">Signal lost</button>
+        <button type="button" data-test="power-warning">Power warning 20%</button>
+        <button type="button" data-test="power-critical">Power critical 10%</button>
+        <button type="button" data-test="power-flicker">Power flicker</button>
+        <button type="button" data-test="power-blackout">Blackout sequence</button>
+      </fieldset>
+      <fieldset class="test-group">
+        <legend>Lights and sound</legend>
+        <button type="button" data-test="lights-cut">Lights cut</button>
+        <button type="button" data-test="lamp-flicker">Flicker stutter</button>
+        <button type="button" data-test="door-knock">Door knock</button>
+        <button type="button" data-test="footstep-left">Footstep left</button>
+        <button type="button" data-test="footstep-centre">Footstep centre</button>
+        <button type="button" data-test="footstep-right">Footstep right</button>
+        <button type="button" data-test="stinger">Stinger</button>
+      </fieldset>
+      <fieldset class="test-group">
+        <legend>Phone call</legend>
+        <button type="button" data-test="phone-start">Start</button>
+        <button type="button" data-test="phone-skip">Skip</button>
+        <button type="button" data-test="phone-interrupt">Interrupt</button>
+      </fieldset>
+      <fieldset class="test-group">
+        <legend>Selected FNAF mode</legend>
+        <button type="button" data-test="mode-jumpscare">Jump to scare</button>
+        <button type="button" data-test="mode-power-out">Power out / run down</button>
+      </fieldset>
+      <div class="btn-row">
+        <button id="testReset" type="button">Reset everything</button>
+        <button id="testClose" type="button">Close</button>
+      </div>
+      <p id="testStatus" class="console-note" role="status" aria-live="polite"></p>
     </section>
 
     <!-- Collapsible right-side director console -->
@@ -154,7 +239,7 @@
         </select>
       </div>
 
-      <div class="field">
+      <div class="field room-only">
         <label for="intensity"
           >Response proxy <output id="intensityValue" for="intensity">0.50</output></label
         >
@@ -171,12 +256,12 @@
         <input id="quality" type="range" min="0" max="1" step="0.01" value="1" />
       </div>
 
-      <div class="btn-row" role="group" aria-label="Quick presets">
+      <div class="btn-row room-only" role="group" aria-label="Quick presets">
         <button id="presetTense" type="button">Build</button>
         <button id="presetCalm" type="button">Relief</button>
       </div>
 
-      <div class="field">
+      <div class="field room-only">
         <label for="scenario">Scenario</label>
         <select id="scenario">
           <option value="cycle">Cycle</option>
@@ -187,7 +272,7 @@
         </select>
       </div>
 
-      <fieldset class="toggles" id="hauntControls">
+      <fieldset class="toggles room-only" id="hauntControls">
         <legend>Haunt</legend>
         <div class="field">
           <label for="difficulty">Night</label>
@@ -207,7 +292,7 @@
         </div>
       </fieldset>
 
-      <fieldset class="toggles">
+      <fieldset class="toggles room-only">
         <legend>Effects</legend>
         <label class="check"
           ><input type="checkbox" id="sound" /> Spatial sound (opt in)</label
@@ -289,6 +374,10 @@
         measurement.
       </p>
     </aside>
+
+    <!-- FNAF status line and key hints (only while a FNAF mode is active) -->
+    <div id="fnafStatus" class="fnaf-status hidden" aria-live="polite"></div>
+    <div id="fnafBar" class="fnaf-bar hidden" aria-label="Keys"></div>
 
     <!-- Center-screen reticle and interaction hint (hidden until wired) -->
     <div id="crosshair" class="hidden" aria-hidden="true"></div>

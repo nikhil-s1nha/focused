@@ -506,6 +506,114 @@ fieldset {
   border-color: #6a2a22;
 }
 
+/* ---------- FNAF modes ---------- */
+body.fnaf .room-only {
+  display: none !important;
+}
+body.fnaf #directorConsole,
+body.fnaf #consoleToggle {
+  display: none !important;
+}
+body.fnaf .diagnostics,
+body.fnaf #interactHint {
+  display: none !important;
+}
+body.fnaf .caption {
+  top: 96px;
+  bottom: auto;
+}
+body.fnaf #directorConsole,
+body.fnaf #consoleToggle,
+body.fnaf #helpToggle + .sr-only {
+  display: none !important;
+}
+body.fnaf .caption {
+  top: 96px;
+  bottom: auto;
+}
+.panel.mode-menu,
+.panel.test-panel {
+  z-index: 40;
+  width: min(360px, 92vw);
+  max-height: 84vh;
+  overflow-y: auto;
+  top: 56px;
+  right: 12px;
+  left: auto;
+  transform: none;
+  padding: 16px;
+}
+.panel.mode-menu {
+  width: min(340px, 92vw);
+}
+.panel.test-panel {
+  top: 56px;
+  left: 12px;
+  right: auto;
+  transform: none;
+}
+.btn-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.btn-col button {
+  text-align: left;
+}
+.test-group {
+  margin-top: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.test-group legend {
+  padding: 0 4px;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.fnaf-status {
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 14;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  background: rgba(8, 10, 10, 0.7);
+  padding: 4px 10px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+.fnaf-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 60px;
+  transform: translateX(-50%);
+  z-index: 14;
+  max-width: min(900px, 96vw);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 14px;
+  font-size: 11px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.fnaf-bar kbd {
+  font: 10px var(--mono);
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--text);
+}
+
 /* ---------- center reticle & hint ---------- */
 #crosshair {
   position: fixed;

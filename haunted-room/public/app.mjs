@@ -11,6 +11,16 @@ import { createAnimatronic } from "./animatronic.mjs";
 import { createGhost } from "./ghost.mjs";
 import { createVolumetricCone, createDustMotes } from "./volumetrics.mjs";
 import { createMonitor } from "./monitor.mjs";
+import {
+  FnafSession,
+  KEYMAP,
+  MODE_LABELS,
+  applyPress,
+} from "./fnaf-session.mjs";
+import { createFnafWorld } from "./fnaf-scene.mjs";
+import { CAMERAS } from "./fnaf/core/data.mjs";
+import { CAMS2 } from "./fnaf/modes/fnaf2.mjs";
+import { CAMS3 } from "./fnaf/modes/fnaf3.mjs";
 import { Haunt } from "./haunt.mjs";
 import { PowerSystem } from "./power.mjs";
 import {
@@ -236,6 +246,8 @@ function resetWorld() {
   power.reset();
   flow.reset();
   blackoutTimeline.reset();
+  blackoutOn = false;
+  blackoutClock = 0;
   tape.reset();
   phantom.reset();
   stats.reset();
@@ -450,9 +462,14 @@ function floodOn() {
 }
 
 // ---------- UI wiring ----------
-$("start").onclick = begin;
-$("reset").onclick = reset;
-$("pause").onclick = togglePause;
+// Overlay buttons are re-rendered for FNAF modes, so Begin is delegated.
+$("overlay").addEventListener("click", (e) => {
+  if (e.target?.id !== "start") return;
+  if (fnaf) fnafBegin();
+  else begin();
+});
+$("reset").onclick = () => (fnaf ? fnafReset() : reset());
+$("pause").onclick = () => (fnaf ? null : togglePause());
 $("sound").onchange = () => setSound($("sound").checked);
 $("volume").oninput = applyVolume;
 $("intensity").oninput = () => {
@@ -613,6 +630,8 @@ if (saved) {
 const held = new Set();
 addEventListener("keydown", (e) => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if (e.key.toLowerCase() === "t") return toggleTestPanel();
+  if (fnaf && fnafKey(e, true)) return;
   const k = e.key.toLowerCase();
   if (["w", "a", "s", "d"].includes(k)) held.add(k);
   else if (k === " ") {
@@ -636,6 +655,7 @@ addEventListener("keydown", (e) => {
       : document.documentElement.requestFullscreen();
 });
 addEventListener("keyup", (e) => {
+  if (fnaf && fnafKey(e, false)) return;
   const k = e.key.toLowerCase();
   held.delete(k);
   if (k === "l") floodDesk = false;
@@ -650,6 +670,7 @@ let dragging = false,
 camera.rotation.order = "YXZ";
 renderer.domElement.addEventListener("pointerdown", (e) => {
   if (renderer.xr.isPresenting) return;
+  clickStart = { x: e.clientX, y: e.clientY };
   dragging = true;
   lastX = e.clientX;
   lastY = e.clientY;
@@ -663,7 +684,14 @@ renderer.domElement.addEventListener("pointermove", (e) => {
   lastX = e.clientX;
   lastY = e.clientY;
 });
-renderer.domElement.addEventListener("pointerup", () => (dragging = false));
+renderer.domElement.addEventListener("pointerup", (e) => {
+  dragging = false;
+  if (fnaf && clickStart && Math.hypot(e.clientX - clickStart.x, e.clientY - clickStart.y) < 5) {
+    fnafPickAt((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  }
+  clickStart = null;
+});
+let clickStart = null;
 renderer.domElement.addEventListener("pointercancel", () => (dragging = false));
 function walk(dt) {
   if (renderer.xr.isPresenting || !held.size || director.phase === "running") return;
@@ -720,6 +748,7 @@ function activateInteractable(target) {
 }
 function interact() {
   if (renderer.xr.isPresenting) return;
+  if (fnaf) return fnafInteractCenter();
   const target = desktopAim();
   if (target) {
     activateInteractable(target);
@@ -777,6 +806,7 @@ function target(text, x, action) {
   return p;
 }
 const startTarget = target("BEGIN / RESET", -1.05, () => {
+  if (fnaf) return fnaf.phase === "idle" ? fnafBegin() : fnafReset();
   if (director.phase === "running") reset();
   else begin();
 });
@@ -805,7 +835,7 @@ for (let i = 0; i < 2; i++) {
   );
   line.scale.z = 5;
   controller.add(line);
-  controller.addEventListener("selectstart", () => pointerSelect(controller));
+  controller.addEventListener("selectstart", () => (fnaf ? fnafSelect(controller) : pointerSelect(controller)));
 }
 function pointerSelect(controller) {
   xrRotation.identity().extractRotation(controller.matrixWorld);
@@ -837,6 +867,22 @@ function pointerSelect(controller) {
     .sort((a, b) => a.d - b.d)[0];
   if (best) return best.run();
   if (director.phase !== "running") begin();
+}
+function fnafSelect(controller) {
+  xrRotation.identity().extractRotation(controller.matrixWorld);
+  aimOrigin.setFromMatrixPosition(controller.matrixWorld);
+  aimDir.set(0, 0, -1).applyMatrix4(xrRotation);
+  raycaster.set(aimOrigin, aimDir);
+  raycaster.far = 6;
+  const items = fnafWorld.interactables();
+  const hit = raycaster.intersectObjects(items.map((i) => i.mesh), true)[0];
+  if (hit) {
+    let o = hit.object;
+    while (o && !o.userData.interactableId) o = o.parent;
+    const item = o && items.find((i) => i.id === o.userData.interactableId);
+    if (item) return item.onInteract(hit);
+  }
+  if (fnaf.phase === "idle") fnafBegin();
 }
 const buttonDown = new Map();
 function controllerButtons() {
@@ -987,6 +1033,12 @@ function wrapText(ctx, text, x, y, maxW, lh) {
   if (line) ctx.fillText(line, x, y);
 }
 
+// Shared by the lamp-flicker encounter and the test panel.
+function lampStutter() {
+  atmosphere.flicker(0.5, 1.6, "stutter");
+  cue("lightFlicker", { intensity: 0.4 });
+}
+
 // ---------- encounter -> entity routing ----------
 let lastEncounterKey = null;
 function routeEncounter(s) {
@@ -998,10 +1050,7 @@ function routeEncounter(s) {
   if (!fresh) return;
   lastEncounterKey = s.encounter.id;
   const e = s.encounter;
-  if (e.id === "lamp-flicker") {
-    atmosphere.flicker(0.5, 1.6, "stutter");
-    cue("lightFlicker", { intensity: 0.4 });
-  }
+  if (e.id === "lamp-flicker") lampStutter();
   if (e.id === "door-creak" && !doorSealed) byId["corridor-door"]?.onInteract();
   if (e.id === "radio-static") {
     const radio = byId.radio;
@@ -1086,6 +1135,8 @@ function applyFlow(actions) {
     }
   }
 }
+let blackoutOn = false; // a power-out sequence is running
+let blackoutClock = 0; // seconds since that power-out began
 function onPowerEvent(e) {
   switch (e.type) {
     case "warning":
@@ -1102,6 +1153,8 @@ function onPowerEvent(e) {
       lampMotes.agitate(0.3);
       break;
     case "blackout":
+      blackoutOn = true;
+      blackoutClock = 0;
       monitor.setActive(false);
       monitor.setSignalLost(true);
       setDoor(false, true);
@@ -1227,6 +1280,577 @@ function updateStats(s) {
   $("aiStat").textContent = `${att.aggression}→${att.effective.toFixed(1)}`;
 }
 
+// ---------- FNAF modes (menu-selected; the room stays the default) ----------
+let fnaf = null; // FnafSession while a FNAF mode is active, else null
+let fnafNight = 1;
+const fnafFlow = new JumpscareFlow();
+const roomRoots = []; // scene children that belong to the room; hidden in FNAF
+const bgRoom = scene.background;
+const fogRoom = scene.fog;
+const FNAF_BG = new THREE.Color("#050505");
+const overlayHTML = $("overlay").innerHTML;
+const fnafWorld = createFnafWorld(THREE, renderer, scene, {
+  audioEngine: audio,
+  onPress: (mode, id, info) => fnafPress(mode, id, info),
+});
+
+function fnafCaption(text, opts) {
+  notice(text, opts);
+}
+
+function setRoomVisible(on) {
+  for (const o of roomRoots) o.visible = on;
+}
+
+function fnafStart(mode, night) {
+  if (fnaf) fnafStop();
+  if (director.phase === "running") reset();
+  fnafNight = Number(night) || 1;
+  fnaf = new FnafSession({
+    mode,
+    night: fnafNight,
+    rng: Math.random,
+    now: () => performance.now() / 1000,
+    secondsPerHour: mode === "fnaf1" ? 30 : 45,
+  });
+  const eye = fnafWorld.enter(mode);
+  setRoomVisible(false);
+  scene.fog = null;
+  scene.background = FNAF_BG;
+  floodlight.intensity = 0;
+  if (!renderer.xr.isPresenting) {
+    rig.position.set(0, 0, 0);
+    camera.position.set(eye.x, eye.y, eye.z);
+  }
+  document.body.classList.add("fnaf");
+  $("pause").classList.add("hidden");
+  $("reset").textContent = "Reset";
+  $("crosshair").classList.add("hidden");
+  $("position").disabled = true;
+  fnafFlow.reset();
+  $("overlay").innerHTML = fnafIntroHTML(mode, fnafNight);
+  $("overlay").classList.remove("hidden");
+  $("summaryPanel").classList.add("hidden");
+  $("fnafBar").innerHTML = KEYMAP[mode].map(([k, v]) => `<span><kbd>${k}</kbd> ${v}</span>`).join("");
+  $("fnafBar").classList.remove("hidden");
+  $("modeLabel").textContent = MODE_LABELS[mode];
+  setState(`${MODE_LABELS[mode]}, night ${fnafNight}. Press Begin or Space.`);
+  updateFnafDock();
+}
+
+function fnafIntroHTML(mode, night) {
+  return `
+    <section class="onboard-card">
+      <p class="eyebrow">${MODE_LABELS[mode].toUpperCase()} &middot; NIGHT ${night}</p>
+      <h1>${night === 1 ? "The first night." : `Night ${night}.`}</h1>
+      <p class="onboard-steps">Nothing moves while you look straight at it. Keep the lights and the doors under control, and mind the power.
+      Keys are listed along the bottom. Click things to use them.</p>
+      <button id="start" type="button" class="primary">Begin (Space)</button>
+      <p class="onboard-note">Sound stays off until you enable it in the console.</p>
+    </section>`;
+}
+
+function fnafStop() {
+  if (!fnaf) return;
+  fnafWorld.exit();
+  fnaf = null;
+  setRoomVisible(true);
+  if (!renderer.xr.isPresenting) {
+    rig.position.set(0, 0, 2);
+    camera.position.set(0, 1.6, 0);
+  }
+  scene.fog = fogRoom;
+  scene.background = bgRoom;
+  document.body.classList.remove("fnaf");
+  $("pause").classList.remove("hidden");
+  $("fnafBar").classList.add("hidden");
+  $("modeLabel").textContent = "Room";
+  $("summaryPanel").classList.add("hidden");
+  $("position").disabled = false;
+  $("overlay").innerHTML = overlayHTML;
+  $("overlay").classList.remove("hidden");
+  $("caption").classList.add("hidden");
+  updateFnafDock();
+}
+
+function fnafBegin() {
+  if (!fnaf || fnaf.phase !== "idle") return;
+  fnaf.start();
+  $("overlay").classList.add("hidden");
+  setState(`Night ${fnafNight}. Watch the doors and the power.`);
+  fnafCaption("Night begins.", { seconds: 3 });
+}
+
+function fnafReset() {
+  if (!fnaf) return;
+  const mode = fnaf.mode;
+  fnafWorld.exit();
+  fnafFlow.reset();
+  fnaf.reset();
+  fnafWorld.enter(mode);
+  scene.background = FNAF_BG;
+  $("overlay").innerHTML = fnafIntroHTML(mode, fnafNight);
+  $("overlay").classList.remove("hidden");
+  $("summaryPanel").classList.add("hidden");
+  $("caption").classList.add("hidden");
+  setState(`${MODE_LABELS[mode]}, night ${fnafNight}. Press Begin or Space.`);
+  updateFnafDock();
+}
+
+function fnafPress(mode, id, info) {
+  if (!fnaf || fnaf.mode !== mode) return;
+  if (id === "dead") return fnafCaption("No power.", { alert: true, seconds: 2 });
+  if (fnaf.phase === "idle") return fnafCaption("Press Begin (Space) first.", { seconds: 2 });
+  if (fnaf.phase !== "running") return;
+  applyPress(fnaf, id, info);
+}
+
+// Keyboard for FNAF modes. Returns true when the key was consumed.
+function fnafKey(e, down) {
+  if (!fnaf) return false;
+  const k = e.key.toLowerCase();
+  const c = fnaf.controls;
+  const mode = fnaf.mode;
+  if (k === " ") {
+    if (down) {
+      if (fnaf.phase === "idle") fnafBegin();
+    }
+    if (mode === "fnaf4") c.hold = down;
+    return true;
+  }
+  if (k === "r") {
+    if (down) fnafReset();
+    return true;
+  }
+  if (k === "e") {
+    if (down) fnafInteractCenter();
+    return true;
+  }
+  const cycle = (list, key, step) => {
+    const i = list.indexOf(c[key]);
+    c[key] = list[(i + step + list.length) % list.length];
+  };
+  if (mode === "fnaf1") {
+    if (!down && (k === "z" || k === "m")) {
+      if (k === "z") c.lightL = false;
+      else c.lightR = false;
+      return true;
+    }
+    if (!down) return false;
+    if (k === "q") applyPress(fnaf, "door-left");
+    else if (k === "p") applyPress(fnaf, "door-right");
+    else if (k === "z") c.lightL = true;
+    else if (k === "m") c.lightR = true;
+    else if (k === "c") applyPress(fnaf, "monitor");
+    else if (k === "[") cycle(CAMERAS, "room", -1);
+    else if (k === "]") cycle(CAMERAS, "room", 1);
+    else return false;
+    return true;
+  }
+  if (mode === "fnaf2") {
+    if (k === "f" || k === "w") {
+      const field = k === "f" ? "flashlight" : "wind";
+      c[field] = down;
+      return true;
+    }
+    if (!down) return false;
+    if (k === "m") applyPress(fnaf, "mask");
+    else if (k === "c") applyPress(fnaf, "monitor");
+    else if (k === "q") applyPress(fnaf, "vent-left");
+    else if (k === "p") applyPress(fnaf, "vent-right");
+    else if (k === "[") cycle(CAMS2, "cam", -1);
+    else if (k === "]") cycle(CAMS2, "cam", 1);
+    else return false;
+    return true;
+  }
+  if (mode === "fnaf3") {
+    if (!down) return false;
+    if (k === "c") applyPress(fnaf, "btn-camera");
+    else if (k === "[") cycle(CAMS3, "cam", -1);
+    else if (k === "]") cycle(CAMS3, "cam", 1);
+    else if (k === "g") applyPress(fnaf, "lure");
+    else if (k === "1") applyPress(fnaf, "vent-0");
+    else if (k === "2") applyPress(fnaf, "vent-1");
+    else if (k === "3") applyPress(fnaf, "vent-2");
+    else if (k === "y") applyPress(fnaf, "btn-audio");
+    else if (k === "i") applyPress(fnaf, "btn-vent");
+    else if (k === "u") c.reboot = "camera";
+    else if (k === "x") {
+      const p = fnaf.engine.snapshot().phantoms?.find?.((q) => q.id || q.name);
+      if (p) c.dismiss = p.id ?? p.name;
+    } else return false;
+    return true;
+  }
+  if (mode === "fnaf4") {
+    if (k === "l") {
+      c.flashlight = down;
+      return true;
+    }
+    if (!down) return false;
+    if (k === "a") c.facing = "left";
+    else if (k === "d") c.facing = "right";
+    else if (k === "s") c.facing = "closet";
+    else if (k === "w") c.facing = "hall";
+    else if (k === "b") c.facing = "bed";
+    else if (k === "n") applyPress(fnaf, "nightlight");
+    else return false;
+    return true;
+  }
+  return false;
+}
+
+// Raycast the FNAF world's interactables from the camera center (E) or a
+// screen point (click). Calls the item's onInteract, which routes to fnafPress.
+const fnafRay = new THREE.Raycaster();
+function fnafPickAt(ndcX, ndcY) {
+  if (!fnaf) return false;
+  fnafRay.setFromCamera({ x: ndcX, y: ndcY }, camera);
+  const items = fnafWorld.interactables();
+  const hit = fnafRay.intersectObjects(items.map((i) => i.mesh), true)[0];
+  if (!hit) return false;
+  let o = hit.object;
+  while (o && !o.userData.interactableId) o = o.parent;
+  const item = o && items.find((i) => i.id === o.userData.interactableId);
+  if (!item) return false;
+  item.onInteract(hit);
+  return true;
+}
+function fnafInteractCenter() {
+  return fnafPickAt(0, 0);
+}
+
+function showFnafSummary(headline) {
+  $("summaryTitle").textContent = "Night over";
+  $("summaryContent").innerHTML = `${headline}<p class="console-note">Derived values only; no raw sensor data is stored.</p>`;
+  $("summaryPanel").classList.remove("hidden");
+}
+
+function fnafCaught(ev) {
+  const raw = ev?.who ?? ev?.entity ?? "something";
+  const who = raw.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+  const why = ev?.reason ? ` (${ev.reason})` : "";
+  setState(`Caught by ${who}. Press Reset to try again.`);
+  showFnafSummary(`<p class="caught"><strong>CAUGHT.</strong> ${who}${why} at ${fnaf?.engine.snapshot().clock ?? fnaf?.engine.snapshot().hour ?? "?"}.</p>`);
+}
+
+function fnafEvent(ev) {
+  fnafWorld.handle(ev);
+  switch (ev.kind) {
+    case "jumpscare":
+      fnafWorld.prepareScare(ev.who, fnaf.mode);
+      applyFnafFlow(fnafFlow.trigger({ entity: ev.who, kind: "lunge" }));
+      break;
+    case "phone-line":
+      notice(ev.text, { seconds: Math.max(3, ev.dur ?? 3) });
+      break;
+    case "power-warning":
+      notice(`POWER ${ev.level}%. Cameras and doors draw more.`, { alert: true });
+      break;
+    case "power-out":
+      notice("POWER OUT. Stay still.", { alert: true, seconds: 6 });
+      break;
+    case "hour":
+      notice(`${ev.label ?? `${ev.n} AM`}`, { seconds: 2 });
+      break;
+    case "win":
+      setState("6 AM. You survived the night.");
+      showFnafSummary(`<p><strong>You survived Night ${fnafNight}.</strong></p>`);
+      break;
+    default:
+      break;
+  }
+}
+
+function applyFnafFlow(actions) {
+  for (const a of actions) {
+    switch (a.type) {
+      case "duck":
+        audio.duck(a.seconds + 0.2);
+        break;
+      case "lightsCut":
+        fnafWorld.cutLights(a.seconds);
+        break;
+      case "lunge":
+        fnafWorld.lungeScare();
+        break;
+      case "stinger":
+        cue("stinger", { intensity: 1 });
+        break;
+      case "end":
+        fnafCaught(a);
+        break;
+    }
+  }
+}
+
+function updateFnafDock() {
+  const on = !!fnaf;
+  $("powerDock").classList.toggle("hidden", !on);
+  $("fnafStatus").classList.toggle("hidden", !on);
+  if (!on) return;
+  const e = fnaf.engine.snapshot();
+  const pct = Math.round(e.power ?? e.powerDisplay ?? 100);
+  $("powerPct").textContent = e.state === "power-out" ? "OUT" : `${pct}%`;
+  $("powerFill").style.width = `${Math.max(0, Math.min(100, pct))}%`;
+  $("powerBar").dataset.tier = powerTier(pct, e.state === "power-out");
+  $("powerEta").textContent = e.usage ? `usage ${e.usage}` : "";
+  $("loadMonitor").classList.toggle("on", !!e.monitorUp);
+  $("loadFlood").classList.toggle("on", !!fnaf.controls.lightL || !!fnaf.controls.lightR);
+  $("loadDoor").classList.toggle("on", !!e.doors?.left || !!e.doors?.right);
+  $("fnafStatus").textContent = `${MODE_LABELS[fnaf.mode]} · night ${fnafNight} · ${e.clock ?? (e.hour ?? "")}`;
+}
+
+// Per-frame FNAF update. Runs instead of the room loop while a mode is active.
+function fnafFrame(dt, time) {
+  fnaf.update(dt);
+  for (const ev of fnaf.consumeEvents()) fnafEvent(ev);
+  applyFnafFlow(fnafFlow.update(dt));
+  fnafWorld.update(dt, time / 1000, fnaf, camera, {
+    tension: performance.now() / 1000 < fnafTensionUntil ? 1 : 0,
+  });
+  musicBox.update(current);
+  updateFnafDock();
+}
+
+// Populated once every room object exists; FNAF modes hide these.
+for (const o of scene.children) if (o !== rig) roomRoots.push(o);
+
+// ---------- mode menu ----------
+function chooseMode(mode) {
+  $("modeMenu").classList.add("hidden");
+  $("modeToggle").setAttribute("aria-expanded", "false");
+  if (mode === "room") return fnafStop();
+  fnafStart(mode, +$("nightSelect").value);
+}
+$("modeToggle").onclick = () => {
+  const open = $("modeMenu").classList.toggle("hidden") === false;
+  $("modeToggle").setAttribute("aria-expanded", String(open));
+};
+for (const b of document.querySelectorAll("#modeMenu [data-mode]"))
+  b.onclick = () => chooseMode(b.dataset.mode);
+
+// ---------- test panel (hidden; T key or ?test=1) ----------
+// Every button drives the same handler the real game uses: haunt events,
+// power events, the FNAF session/event path, or the same audio cue call.
+// Scares for FNAF modes fast-forward the REAL engine until it kills or drains
+// the player, so the engine (not a fake) decides the scare.
+let testTimer = 0;
+function toggleTestPanel(force) {
+  const el = $("testPanel");
+  const open = typeof force === "boolean" ? force : el.classList.contains("hidden");
+  el.classList.toggle("hidden", !open);
+  return false;
+}
+function testStatus(text) {
+  $("testStatus").textContent = text;
+}
+function testMode() {
+  return $("testMode").value;
+}
+function ensureRoom() {
+  if (fnaf) fnafStop();
+  if (director.phase !== "running") begin();
+}
+function ensureFnaf() {
+  const m = testMode();
+  if (!fnaf || fnaf.mode !== m) fnafStart(m, +$("testNight").value);
+  if (fnaf.phase === "idle") fnafBegin();
+  return m;
+}
+function fastForward(pred, maxSteps = 200000) {
+  let i = 0;
+  for (; i < maxSteps && fnaf.phase === "running" && !pred(); i++) fnaf.update(0.1);
+  return i;
+}
+let fnafTensionUntil = 0; // seconds; drives the office lamp flicker in FNAF1
+function signalLostFor(sec) {
+  monitor.setSignalLost(true);
+  clearTimeout(testTimer);
+  testTimer = setTimeout(() => monitor.setSignalLost(false), sec * 1000);
+}
+function camInterference() {
+  monitor.staticBurst(0.7);
+  cue("static", { intensity: 0.5 });
+}
+const TESTS = {
+  "room-jumpscare": () => {
+    ensureRoom();
+    haunt.jumpscare("attendant", "lunge");
+    return "Attendant jumpscare: haunt event, telegraph, lunge, caught end.";
+  },
+  "room-ghost": () => {
+    ensureRoom();
+    haunt.jumpscare("ghost", "rush");
+    return "Ghost rush: haunt event, telegraph, rush, caught end.";
+  },
+  "room-lunge-only": () => {
+    ensureRoom();
+    attendant.trigger("jumpscare");
+    return "Attendant pose only: lunge with no telegraph and no end (entity check).";
+  },
+  "static-burst": () => {
+    if (fnaf) {
+      ensureFnaf();
+      if (!fnaf.engine.snapshot().monitorUp && fnaf.mode === "fnaf1") applyPress(fnaf, "monitor");
+      if (fnaf.mode === "fnaf1") {
+        applyPress(fnaf, "camera", { room: CAMERAS[(CAMERAS.indexOf(fnaf.controls.room) + 1) % CAMERAS.length] });
+        return "Camera switch with the monitor up: static burst and camera blip.";
+      }
+      fnafEvent({ kind: "static", room: null });
+      return "Static burst (this mode has no room camera feed; sound and HUD only).";
+    }
+    ensureRoom();
+    setCameras(true);
+    camInterference();
+    return "Monitor static burst (same call as a watched entity moving).";
+  },
+  "signal-lost": () => {
+    if (fnaf && fnaf.mode === "fnaf1") {
+      fnafWorld.handle({ kind: "static" });
+      fnaf.controls.monitor = true;
+      return "FNAF1 signal path uses the camera feed; see Static burst.";
+    }
+    ensureRoom();
+    signalLostFor(2);
+    return "Signal lost for 2 s (monitor shows static).";
+  },
+  "power-warning": () => {
+    if (fnaf) { fnafEvent({ kind: "power-warning", level: 20 }); return "Power warning (FNAF handler)."; }
+    ensureRoom();
+    onPowerEvent({ type: "warning", level: 0.2 });
+    return "Power warning (20%): HUD and audio cue.";
+  },
+  "power-critical": () => {
+    if (fnaf) { fnafEvent({ kind: "power-warning", level: 10 }); return "Power critical (FNAF handler, 10%)."; }
+    ensureRoom();
+    onPowerEvent({ type: "critical", level: 0.1 });
+    return "Power critical (10%): stronger HUD notice and audio cue.";
+  },
+  "power-flicker": () => {
+    if (fnaf) {
+      fnafTensionUntil = performance.now() / 1000 + 1.6;
+      return "Power flicker: FNAF1 office lamp stutters while tension is high.";
+    }
+    ensureRoom();
+    onPowerEvent({ type: "flicker", level: 0.2 });
+    return "Power flicker: lamp sag and audio cue.";
+  },
+  "power-blackout": () => {
+    if (fnaf) return TESTS["mode-power-out"]();
+    ensureRoom();
+    onPowerEvent({ type: "blackout" });
+    return "Blackout: monitor dies, then dark, music box, eyes, scare (about 13 s).";
+  },
+  "lights-cut": () => {
+    if (fnaf) { applyFnafFlow([{ type: "lightsCut", seconds: 1.5 }]); return "Lights cut for 1.5 s (FNAF lights only)."; }
+    ensureRoom();
+    applyFlow([{ type: "lightsCut", seconds: 1.5 }]);
+    return "Lights cut for 1.5 s.";
+  },
+  "lamp-flicker": () => {
+    if (fnaf) { fnafTensionUntil = performance.now() / 1000 + 1.6; return "Lamp flicker (FNAF1 office lamp)."; }
+    ensureRoom();
+    lampStutter();
+    return "Lamp stutter: fluorescent flicker for 1.6 s, capped below 3 Hz.";
+  },
+  "door-knock": () => {
+    if (fnaf) { fnafEvent({ kind: "door-knock", who: "ratchet", side: "left", powerLoss: 0 }); return "Door knock at the left door."; }
+    ensureRoom();
+    cue("knock", { position: { x: 0.95, z: -5 }, intensity: 0.8 });
+    return "Door knock at the corridor door.";
+  },
+  "footstep-left": () => footstepAt("left"),
+  "footstep-centre": () => footstepAt("center"),
+  "footstep-right": () => footstepAt("right"),
+  "phone-start": () => {
+    ensureFnaf();
+    if (fnaf.callPhone(+$("testNight").value)) return "Phone call started (subtitles and ring).";
+    return "A phone call is already running.";
+  },
+  "phone-skip": () => {
+    if (!fnaf?.phone) return "No phone call to skip. Start one first.";
+    fnaf.skipPhone();
+    return "Phone call skipped.";
+  },
+  "phone-interrupt": () => {
+    if (!fnaf?.phone) return "No phone call to interrupt. Start one first.";
+    fnaf.interruptPhone();
+    return "Phone call interrupted.";
+  },
+  stinger: () => {
+    cue("stinger", { intensity: 1 });
+    return "Stinger sound.";
+  },
+  "mode-jumpscare": () => {
+    // The engine decides. A night can end in a win, so retry on a fresh night
+    // (up to 6 attempts) until the engine itself produces the scare.
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      ensureFnaf();
+      fastForward(() => fnaf.phase !== "running");
+      if (fnaf.phase === "dead") return `Jumped the real ${MODE_LABELS[testMode()]} engine to its scare (attempt ${attempt}).`;
+      fnafStart(testMode(), +$("testNight").value);
+    }
+    return "No scare in 6 nights of this mode's engine; try again.";
+  },
+  "mode-power-out": () => {
+    ensureFnaf();
+    const m = fnaf.mode;
+    if (m === "fnaf1") {
+      applyPress(fnaf, "door-left");
+      applyPress(fnaf, "door-right");
+      applyPress(fnaf, "monitor");
+      fastForward(() => !!fnaf.engine.snapshot().powerOut);
+      return fnaf.engine.snapshot().powerOut
+        ? "Power out: the real engine reached its power-out sequence."
+        : "Power did not run out before the scare (see Jump to scare).";
+    }
+    if (m === "fnaf2") {
+      fastForward(() => fnaf.engine.snapshot().musicbox?.state === "empty");
+      return "Music box run down (this mode's power-out): escape countdown.";
+    }
+    if (m === "fnaf3") {
+      fastForward(() => Object.values(fnaf.engine.snapshot().systems ?? {}).some((s) => s.fault));
+      return "A system fault (this mode's power-out): reboot it with Y, U or I.";
+    }
+    return "The Bedroom has no power mechanic in its engine; nothing to run out.";
+  },
+};
+function footstepAt(side) {
+  if (fnaf) {
+    ensureFnaf();
+    fnafEvent({ kind: "move", who: side === "left" ? "bellwether" : side === "right" ? "lark" : "ratchet" });
+    return `Footstep, ${side}.`;
+  }
+  ensureRoom();
+  const p = { left: { x: -3, z: -2 }, center: { x: 0, z: -4 }, right: { x: 3, z: -2 } }[side];
+  cue("footstep", { position: p, intensity: 0.8 });
+  return `Footstep, ${side}.`;
+}
+function runTest(id) {
+  const fn = TESTS[id];
+  if (!fn) return testStatus(`Unknown test ${id}`);
+  try {
+    testStatus(fn());
+  } catch (err) {
+    testStatus(`Test error: ${err.message}`);
+    throw err;
+  }
+}
+function resetAll() {
+  if (fnaf) fnafStop();
+  clearTimeout(testTimer);
+  monitor.setSignalLost(false);
+  fnafTensionUntil = 0;
+  reset();
+  testStatus("Reset: room, cameras, power, lights and scares cleared.");
+}
+for (const b of document.querySelectorAll("#testPanel [data-test]")) {
+  b.onclick = () => runTest(b.dataset.test);
+}
+$("testReset").onclick = resetAll;
+$("testClose").onclick = () => toggleTestPanel(false);
+if (new URLSearchParams(location.search).get("test") === "1") toggleTestPanel(true);
+
 // ---------- render loop ----------
 let lastTime = performance.now(),
   lastHud = 0,
@@ -1242,6 +1866,12 @@ renderer.setAnimationLoop((time) => {
     fpsValue = fpsFrames / fpsAccum;
     fpsAccum = 0;
     fpsFrames = 0;
+  }
+  if (fnaf) {
+    fnafFrame(dt, time);
+    if (renderer.xr.isPresenting) controllerButtons();
+    renderer.render(scene, camera);
+    return;
   }
   current = director.step(dt, now);
   const running = current.phase === "running" && !current.paused,
@@ -1289,8 +1919,8 @@ renderer.setAnimationLoop((time) => {
     power.update(dt * powerScale);
     for (const e of power.consumeEvents()) onPowerEvent(e);
     const ps = power.getState();
-    for (const b of blackoutTimeline.step(ps.blackout, ps.blackoutElapsed * (1 / powerScale)))
-      onBlackoutBeat(b);
+    if (blackoutOn) blackoutClock += dt;
+    for (const b of blackoutTimeline.step(blackoutOn, blackoutClock)) onBlackoutBeat(b);
     if (!windLocked) musicBox.setWind(Math.min(1, power.getLevel() / 0.5));
     stats.tick(dt, { monitorUp: monitor.isActive(), floodlightOn: floodOn() });
     // tape briefing + phantom audio-only sounds
@@ -1384,6 +2014,18 @@ renderer.setAnimationLoop((time) => {
   }
   renderer.render(scene, camera);
 });
+window.__fnaf = {
+  get session() {
+    return fnaf;
+  },
+  get flow() {
+    return fnafFlow;
+  },
+  world: fnafWorld,
+  get rigPosition() {
+    return rig.position.toArray();
+  },
+};
 window.__quiet = {
   director,
   haunt,
