@@ -92,6 +92,21 @@ npm start
 
 Open `https://YOUR-CERTIFICATE-HOSTNAME:8443` in Quest Browser. The page chooses **wss://…/signals** automatically. A trusted HTTPS reverse proxy must forward both normal HTTP and WebSocket upgrades. Never commit certificate keys or tokens. The Quest's network route is independent of a Mac–Pi Ethernet link; venue Wi-Fi may isolate clients.
 
+## Show the headset view on a TV (HDMI)
+
+The simple game has a spectator page that replays what the VR player sees. It
+renders the same room on the laptop from the headset's live head pose and scare
+events, so it is full quality with no video capture or lag from casting.
+
+1. Plug the laptop into the TV with HDMI. On a Mac: System Settings, Displays, set the TV to **Extend** (or mirror).
+2. With the server running (`npm run quest` or `npm start`), open **http://127.0.0.1:8080/simple.html?spectate=1** in Chrome on the laptop.
+3. Drag that window onto the TV and press **F** for fullscreen.
+4. Put the headset on and play. The TV shows the player's view, doors and scares as they happen. Tick **Sound** on the TV page if you want the room's audio from the TV speakers.
+
+A TV page opened mid-session catches up to the current state and reconnects by itself. Only head pose, a few scare-event fields and the session phase are relayed through `/spectate`; no sensor data. It follows the server's `HOST`/`PORT` settings, so for another machine use `HOST=0.0.0.0 npm start` on a trusted network only.
+
+Not covered: the TV page mirrors the head pose, so the picture turns as the player's head turns (that is the point), and it is a re-render, not a recording of the headset's pixels. Meta's own casting or `scrcpy` are alternatives if you want the headset's actual video.
+
 ## Director tuning
 
 `public/director.mjs` owns CONFIG: smoothing 1.5 s, low 0.30, high 0.75, dwell 4 s, relief 8 s, stale 3 s, minimum quality 0.50, tension cap 0.85, experience 120 s. These are demonstration settings, not validated physiological thresholds. Timing advances during active rendered frames; browser suspension does not consume the session.

@@ -35,7 +35,6 @@ export const ROOMS3 = {
   'ventC-far': ['lobby', 'ventC-near'], 'ventC-near': ['ventC-far'],
 };
 export const CAMS3 = ['cellar', 'hall1', 'kitchen', 'hall2', 'arcade', 'storage', 'lobby'];
-export const LURE_ROOMS = CAMS3.filter((r) => r !== 'lobby' || true);
 export const SECTIONS = ['A', 'B', 'C'];
 export const SYSTEMS = ['audio', 'camera', 'vent'];
 export const PHANTOMS = ['cinderling', 'lanternhead', 'mothlady', 'hollow-jester', 'marrowbird'];
@@ -244,7 +243,6 @@ export class Fnaf3Mode {
     let c = target; while (prev.get(c) !== from && prev.get(c) !== null) c = prev.get(c);
     return c;
   }
-  dist(from, target) { return this.pathLen(from, target); }
   pathLen(from, target) {
     const d = new Map([[from, 0]]); const q = [from];
     while (q.length) { const c = q.shift(); if (c === target) return d.get(c); for (const n of this.neighbours(c)) if (!d.has(n)) { d.set(n, d.get(c) + 1); q.push(n); } }

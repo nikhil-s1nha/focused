@@ -146,8 +146,6 @@ export class Fnaf2Mode {
       if (def.kind === 'puppet' || lvl <= 0 || s.inOffice || s.ventT > 0) continue;
       const last = def.route.length - 1;
       if (s.idx >= last) continue; // waiting at the final room (hall end / vent mouth)
-      // flashlight on the hallway holds back characters about to step into it
-      if (def.kind === 'hall' && s.idx === last - 1 && this.flash) continue;
       if (Math.floor(this.rng() * C2.AI_MAX) + 1 <= lvl) {
         const from = s.room; s.idx++; s.room = def.route[s.idx];
         this.emit({ type: 'move', who: id, from, to: s.room });

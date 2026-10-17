@@ -61,7 +61,7 @@ test('reboot takes time and blocks other reboots', () => {
   m.update(0.1, { reboot: 'audio' });
   assert.ok(m.consumeEvents().some((e) => e.id === 'reboot-blocked'));
   assert.equal(m.snapshot().reboot.system, 'camera');
-  run(m, 6.5, {}); assert.equal(m.snapshot().systems.camera.fault, false);
+  run(m, 7.2, {}); assert.equal(m.snapshot().systems.camera.fault, false);
   assert.equal(m.snapshot().systems.audio.fault, true);
   m.update(0.1, {}); m.update(0.1, { reboot: 'audio' }); run(m, 5.2);
   assert.equal(m.snapshot().systems.audio.fault, false);

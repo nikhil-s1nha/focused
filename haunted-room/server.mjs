@@ -5,12 +5,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { sanitizeSignal } from "./relay.mjs";
+import { sanitizeSpectate } from "./spectate.mjs";
 const root = path.dirname(fileURLToPath(import.meta.url));
 export function createSceneServer({
   tls = null,
   publishToken = process.env.PUBLISH_TOKEN,
 } = {}) {
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 8192 });
+  // Spectator relay: the headset page publishes pose/events/phase; TV pages replay them.
+  const spectators = new WebSocketServer({ noServer: true, maxPayload: 2048 });
+  let lastPhase = null,
+    lastPose = null;
   const handler = (req, res) => {
     const pathname = new URL(req.url, "http://local").pathname;
     if (pathname === "/api/signal") {
@@ -114,7 +119,30 @@ export function createSceneServer({
     ? https.createServer(tls, handler)
     : http.createServer(handler);
   server.on("upgrade", (req, socket, head) => {
-    if (new URL(req.url, "http://local").pathname !== "/signals") {
+    const upgradePath = new URL(req.url, "http://local").pathname;
+    if (upgradePath === "/spectate") {
+      spectators.handleUpgrade(req, socket, head, (ws) => {
+        ws.on("error", () => {});
+        // Late joiners (a TV page opened mid-session) catch up immediately.
+        if (lastPhase) ws.send(lastPhase);
+        if (lastPose) ws.send(lastPose);
+        ws.on("message", (raw) => {
+          let frame;
+          try {
+            frame = sanitizeSpectate(JSON.parse(raw.toString()));
+          } catch {}
+          if (!frame) return;
+          const text = JSON.stringify(frame);
+          if (frame.type === "phase") lastPhase = text;
+          else if (frame.type === "pose") lastPose = text;
+          for (const peer of spectators.clients)
+            if (peer !== ws && peer.readyState === 1 && peer.bufferedAmount < 32768)
+              peer.send(text);
+        });
+      });
+      return;
+    }
+    if (upgradePath !== "/signals") {
       socket.destroy();
       return;
     }
@@ -123,7 +151,7 @@ export function createSceneServer({
       sockets.emit("connection", ws, req);
     });
   });
-  return { server, sockets };
+  return { server, sockets, spectators };
 }
 if (
   process.argv[1] &&

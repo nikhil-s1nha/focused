@@ -109,7 +109,7 @@ function bringUp(serial, port) {
     console.log("adb reverse failed:", rev.stderr || rev.stdout);
     return false;
   }
-  const url = `http://localhost:${port}/?quest=1`;
+  const url = `http://localhost:${port}/simple.html?quest=1`;
   run("adb", [
     ...s, "shell", "am", "start",
     "-a", "android.intent.action.VIEW", "-d", url, "-p", QUEST_BROWSER,
