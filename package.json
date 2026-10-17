@@ -1,0 +1,1 @@
+{"name":"focused-eeg-vr","private":true,"type":"module","scripts":{"dev":"vite --host 0.0.0.0","build":"vite build","preview":"vite preview --host 0.0.0.0","mock":"node mock-server.js","test":"node --test"},"dependencies":{"three":"0.186.1","ws":"8.18.3"},"devDependencies":{"vite":"6.4.1"}}
