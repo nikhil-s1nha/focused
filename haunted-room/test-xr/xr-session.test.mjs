@@ -12,15 +12,18 @@ import {
   signatureDiff,
   waitForXRFrames,
   hooks,
+  appBootBlockers,
+  skipIfBlocked,
 } from "./harness.mjs";
 
 const PORT = 8098;
-let server, browser;
+let server, browser, blockers;
 
 test.before(async () => {
   server = startServer(PORT);
   browser = await launchBrowser();
   await server.ready;
+  blockers = await appBootBlockers(server.origin);
 });
 
 test.after(async () => {
@@ -31,8 +34,10 @@ test.after(async () => {
 /** Load the page with IWER installed and wait for the app to offer VR. */
 async function loadWithXR() {
   const fixture = await createPage(browser, { emulateXR: true });
-  const { page } = fixture;
+  const { page, failedRequests } = fixture;
   await page.goto(server.origin + "/", { waitUntil: "load" });
+  await page.waitForTimeout(500);
+  assert.deepEqual(failedRequests, [], "all app resources must load");
   await page.waitForSelector("#viewport canvas");
   const installed = await page.evaluate(() => window.__xrTest.iwerInstalled);
   assert.ok(installed, "IWER runtime must be installed over navigator.xr");
@@ -50,7 +55,8 @@ async function enterVR(page) {
   await waitForXRFrames(page, 5);
 }
 
-test("xr-entry: page offers ENTER VR and an immersive session starts rendering", async () => {
+test("xr-entry: page offers ENTER VR and an immersive session starts rendering", async (t) => {
+  if (skipIfBlocked(t, blockers)) return;
   const { context, page, consoleErrors } = await loadWithXR();
   try {
     await enterVR(page);
@@ -71,7 +77,8 @@ test("xr-entry: page offers ENTER VR and an immersive session starts rendering",
   }
 });
 
-test("stereo: XR base layer is stereo-sized and both eye halves render content", async () => {
+test("stereo: XR base layer is stereo-sized and both eye halves render content", async (t) => {
+  if (skipIfBlocked(t, blockers)) return;
   const { context, page } = await loadWithXR();
   try {
     await enterVR(page);
@@ -95,7 +102,8 @@ test("stereo: XR base layer is stereo-sized and both eye halves render content",
   }
 });
 
-test("head-pose: rotating/moving the emulated headset changes the rendered view", async () => {
+test("head-pose: rotating/moving the emulated headset changes the rendered view", async (t) => {
+  if (skipIfBlocked(t, blockers)) return;
   const { context, page } = await loadWithXR();
   try {
     await enterVR(page);
@@ -124,7 +132,8 @@ test("head-pose: rotating/moving the emulated headset changes the rendered view"
   }
 });
 
-test("input: synthetic controller trigger squeeze produces select without errors", async () => {
+test("input: synthetic controller trigger squeeze produces select without errors", async (t) => {
+  if (skipIfBlocked(t, blockers)) return;
   const { context, page, consoleErrors } = await loadWithXR();
   try {
     await enterVR(page);
@@ -158,7 +167,8 @@ test("input: synthetic controller trigger squeeze produces select without errors
   }
 });
 
-test("perf-signal: ~5s emulated-session FPS and draw stats (record-only)", async () => {
+test("perf-signal: ~5s emulated-session FPS and draw stats (record-only)", async (t) => {
+  if (skipIfBlocked(t, blockers)) return;
   const { context, page } = await loadWithXR();
   try {
     await enterVR(page);

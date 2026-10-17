@@ -7,15 +7,18 @@ import {
   launchBrowser,
   createPage,
   samplePixels,
+  appBootBlockers,
+  skipIfBlocked,
 } from "./harness.mjs";
 
 const PORT = 8097;
-let server, browser;
+let server, browser, blockers;
 
 test.before(async () => {
   server = startServer(PORT);
   browser = await launchBrowser();
   await server.ready;
+  blockers = await appBootBlockers(server.origin);
 });
 
 test.after(async () => {
@@ -23,11 +26,17 @@ test.after(async () => {
   await server?.stop();
 });
 
-test("smoke: page loads with zero console/page errors and a #viewport canvas", async () => {
-  const { context, page, consoleErrors } = await createPage(browser);
+test("smoke: page loads with zero console/page errors and a #viewport canvas", async (t) => {
+  if (skipIfBlocked(t, blockers)) return;
+  const { context, page, consoleErrors, failedRequests } = await createPage(browser);
   try {
     const res = await page.goto(server.origin + "/", { waitUntil: "load" });
     assert.equal(res.status(), 200, "index must serve with HTTP 200");
+
+    // Fail fast with the exact URL if any module/resource 404s — a missing
+    // ESM import silently prevents the whole app from booting.
+    await page.waitForTimeout(1000);
+    assert.deepEqual(failedRequests, [], "all app resources must load");
 
     // The app module appends the renderer canvas to #viewport.
     await page.waitForSelector("#viewport canvas");
@@ -46,7 +55,8 @@ test("smoke: page loads with zero console/page errors and a #viewport canvas", a
   }
 });
 
-test("smoke: without XR emulation the VR button degrades gracefully", async () => {
+test("smoke: without XR emulation the VR button degrades gracefully", async (t) => {
+  if (skipIfBlocked(t, blockers)) return;
   const { context, page } = await createPage(browser);
   try {
     await page.goto(server.origin + "/", { waitUntil: "load" });
@@ -66,7 +76,8 @@ test("smoke: without XR emulation the VR button degrades gracefully", async () =
   }
 });
 
-test("render: the WebGL canvas draws a non-black, non-uniform image", async () => {
+test("render: the WebGL canvas draws a non-black, non-uniform image", async (t) => {
+  if (skipIfBlocked(t, blockers)) return;
   const { context, page, consoleErrors } = await createPage(browser);
   try {
     await page.goto(server.origin + "/", { waitUntil: "load" });

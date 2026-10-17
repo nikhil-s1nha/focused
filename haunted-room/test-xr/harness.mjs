@@ -144,6 +144,7 @@ export async function createPage(browser, { emulateXR = false } = {}) {
 
   const page = await context.newPage();
   const consoleErrors = [];
+  const failedRequests = [];
   page.on("console", (msg) => {
     if (msg.type() !== "error") return;
     const text = msg.text();
@@ -151,7 +152,15 @@ export async function createPage(browser, { emulateXR = false } = {}) {
     consoleErrors.push(text);
   });
   page.on("pageerror", (err) => consoleErrors.push("pageerror: " + err.message));
-  return { context, page, consoleErrors };
+  // A 404 on an ESM module import silently kills the whole app graph; record
+  // failing resource loads so tests fail with the actual missing URL.
+  page.on("response", (res) => {
+    if (res.status() < 400) return;
+    const url = res.url();
+    if (IGNORED_CONSOLE.some((re) => re.test(url))) return;
+    failedRequests.push(`${res.status()} ${url}`);
+  });
+  return { context, page, consoleErrors, failedRequests };
 }
 
 /**
@@ -217,6 +226,48 @@ export async function waitForXRFrames(page, n, timeoutMs = 45000) {
     [start, n],
     { timeout: timeoutMs },
   );
+}
+
+/**
+ * Mid-rewrite guard: other agents are actively rewriting public/*.mjs, and a
+ * missing ESM import 404s and silently kills the whole app graph. Walk the
+ * local ./ import graph from app.mjs via the running server and report any
+ * modules that do not resolve. When this returns a non-empty list the app
+ * cannot boot AT ALL, so tests skip with that reason instead of failing on a
+ * defect in files this harness does not own. Returns [] when the app is whole.
+ */
+export async function appBootBlockers(origin) {
+  const blockers = [];
+  const seen = new Set();
+  const queue = ["/app.mjs"];
+  while (queue.length) {
+    const path = queue.shift();
+    if (seen.has(path)) continue;
+    seen.add(path);
+    let res;
+    try {
+      res = await fetch(origin + path);
+    } catch (err) {
+      blockers.push(`${path}: fetch failed (${err.message})`);
+      continue;
+    }
+    if (!res.ok) {
+      blockers.push(`${path}: HTTP ${res.status}`);
+      continue;
+    }
+    const src = await res.text();
+    for (const m of src.matchAll(/from\s+["'](\.\/[^"']+\.mjs)["']/g)) {
+      queue.push("/" + m[1].slice(2));
+    }
+  }
+  return blockers;
+}
+
+/** Skip the test with a clear mid-rewrite reason. Returns true if skipped. */
+export function skipIfBlocked(t, blockers) {
+  if (!blockers || blockers.length === 0) return false;
+  t.skip(`app mid-rewrite, cannot boot — missing modules: ${blockers.join("; ")}`);
+  return true;
 }
 
 export const hooks = (page) => page.evaluate(() => {

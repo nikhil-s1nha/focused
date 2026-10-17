@@ -1,8 +1,21 @@
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
-import { Director, validSignal } from "./director.mjs";
-const $ = (id) => document.getElementById(id),
-  director = new Director();
+import { Director } from "./director.mjs";
+import { SignalClient } from "./signal-client.mjs";
+import { AudioEngine } from "./audio-engine.mjs";
+import { MusicBox } from "./music-box.mjs";
+import { createEnvironment } from "./environment.mjs";
+import { createMaterialLibrary } from "./textures.mjs";
+import { createAtmosphere, ATMOSPHERES } from "./atmosphere.mjs";
+import { createAnimatronic } from "./animatronic.mjs";
+import { createGhost } from "./ghost.mjs";
+import { createVolumetricCone } from "./volumetrics.mjs";
+import { createMonitor } from "./monitor.mjs";
+
+const $ = (id) => document.getElementById(id);
+const director = new Director();
+
+// ---------- renderer / scene / rig ----------
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#0a100f");
 scene.fog = new THREE.FogExp2(0x18221e, 0.055);
@@ -22,9 +35,13 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType("local-floor");
+renderer.xr.setFoveation(0.666);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 $("viewport").appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
+window.__renderer = renderer; // read-only hook for the XR test harness
+
+// ---------- lights owned by the app (atmosphere drives their values) ----------
 const ambient = new THREE.HemisphereLight(0x99b1a2, 0x10130e, 0.65);
 scene.add(ambient);
 const lamp = new THREE.PointLight(0xf0d6a0, 20, 12, 2);
@@ -33,86 +50,423 @@ scene.add(lamp);
 const windowLight = new THREE.PointLight(0x759fa4, 8, 9, 2);
 windowLight.position.set(2.8, 1.8, -2);
 scene.add(windowLight);
-const mats = {
-  wall: new THREE.MeshStandardMaterial({ color: 0x394039, roughness: 1 }),
-  wood: new THREE.MeshStandardMaterial({ color: 0x3a2c22, roughness: 0.9 }),
-  floor: new THREE.MeshStandardMaterial({ color: 0x38372c, roughness: 0.95 }),
-  dark: new THREE.MeshStandardMaterial({ color: 0x080e0d, roughness: 1 }),
-  metal: new THREE.MeshStandardMaterial({
+const fixture = new THREE.Mesh(
+  new THREE.ConeGeometry(0.36, 0.22, 16, 1, true),
+  new THREE.MeshStandardMaterial({
     color: 0x55594a,
     roughness: 0.7,
     metalness: 0.25,
   }),
-};
-function box(x, y, z, w, h, d, mat) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  m.position.set(x, y, z);
-  scene.add(m);
-  return m;
-}
-// Fixed room geometry. Effects never shift the floor or the player.
-box(0, -0.08, -1, 7, 0.16, 9, mats.floor);
-box(-3.5, 1.8, -1, 0.15, 3.6, 9, mats.wall);
-box(3.5, 1.8, -1, 0.15, 3.6, 9, mats.wall);
-box(0, 3.6, -1, 7, 0.15, 9, mats.dark);
-box(0, 1.8, 3.5, 7, 3.6, 0.15, mats.wall);
-box(-2.25, 1.8, -5.5, 2.5, 3.6, 0.15, mats.wall);
-box(2.25, 1.8, -5.5, 2.5, 3.6, 0.15, mats.wall);
-box(0, 3.25, -5.5, 2, 0.7, 0.15, mats.wall);
-box(0, 1.4, -5.65, 2, 2.8, 0.12, mats.dark);
-for (const x of [-1.08, 1.08]) box(x, 1.45, -5.38, 0.14, 2.9, 0.2, mats.wood);
-box(0, 2.91, -5.38, 2.3, 0.14, 0.2, mats.wood);
-for (let i = 0; i < 18; i++)
-  box(-3.3 + i * 0.39, 0.009, -1, 0.012, 0.009, 8.8, mats.dark);
-for (const x of [-3.38, 3.38]) {
-  box(x, 0.16, -1, 0.08, 0.32, 9, mats.wood);
-  for (let z = -5; z < 3.5; z += 1.25)
-    box(x, 1.05, z, 0.1, 1.5, 0.04, mats.wood);
-  box(x, 1.8, -1, 0.1, 0.08, 9, mats.wood);
-}
-// A narrow window, a dusty cabinet and an empty chair.
-box(3.39, 2, -2, 0.03, 1.7, 1.3, mats.dark);
-for (const z of [-2.66, -2, -1.34])
-  box(3.35, 2, z, 0.08, 1.8, 0.055, mats.wood);
-box(3.35, 2, -2, 0.08, 0.06, 1.3, mats.wood);
-box(-2.55, 0.65, -3.7, 1.2, 1.3, 0.6, mats.wood);
-box(-2.55, 1.34, -3.7, 1.3, 0.08, 0.7, mats.metal);
-for (const x of [-2.85, -2.25]) box(x, 0.7, -3.385, 0.5, 1, 0.035, mats.floor);
-const chair = new THREE.Group();
-chair.position.set(1.8, 0, -3.7);
-chair.rotation.y = -0.3;
-scene.add(chair);
-function chairPart(x, y, z, w, h, d) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mats.wood);
-  m.position.set(x, y, z);
-  chair.add(m);
-}
-chairPart(0, 0.48, 0, 0.62, 0.1, 0.62);
-for (const x of [-0.24, 0.24])
-  for (const z of [-0.24, 0.24]) chairPart(x, 0.23, z, 0.065, 0.46, 0.065);
-chairPart(0, 1, -0.27, 0.62, 0.85, 0.08);
-const fixture = new THREE.Mesh(
-  new THREE.ConeGeometry(0.36, 0.22, 16, 1, true),
-  mats.metal,
 );
 fixture.position.copy(lamp.position);
 scene.add(fixture);
-box(0, 3.2, -1, 0.02, 0.6, 0.02, mats.dark);
-const figure = new THREE.Group(),
-  silhouette = new THREE.MeshBasicMaterial({
-    color: 0x020403,
-    transparent: true,
-    opacity: 0,
+
+// ---------- world: environment, entities, cinematics ----------
+const materialLibrary = createMaterialLibrary(THREE);
+const environment = createEnvironment(THREE, scene, {
+  materials: materialLibrary.materials,
+});
+const atmosphere = createAtmosphere(THREE, {
+  scene,
+  ambient,
+  lamp,
+  windowLight,
+});
+atmosphere.setDomOverlay(true);
+const attendant = createAnimatronic(THREE, scene);
+const ghost = createGhost(THREE, scene);
+const monitor = createMonitor(THREE, renderer, scene);
+const lampCone = createVolumetricCone(THREE, {
+  radiusBottom: 1.5,
+  height: 2.7,
+  color: 0xf0d6a0,
+  anglePower: 5,
+  attenuation: 3.4,
+});
+lampCone.mesh.position.set(0, 2.72, -1);
+scene.add(lampCone.mesh);
+
+// ---------- audio ----------
+const audio = new AudioEngine();
+const musicBox = new MusicBox();
+let audioEnabled = false;
+async function setSound(value) {
+  try {
+    await audio.setEnabled(value);
+    await musicBox.setEnabled(value);
+    audioEnabled = value;
+    $("sound").checked = value;
+    if (value) applyVolume();
+  } catch (e) {
+    audioEnabled = false;
+    $("sound").checked = false;
+    $("error").textContent = `Audio unavailable: ${e.message}`;
+  }
+}
+function applyVolume() {
+  const v = +$("volume").value;
+  audio.setVolume(v);
+  musicBox.setVolume(v * 0.6);
+  $("volumeValue").textContent = v.toFixed(2);
+}
+
+// ---------- signal input ----------
+let connectionStatus = { connection: "idle", error: null };
+const client = new SignalClient({
+  onSignal(message, receiptMs) {
+    director.receive(message, receiptMs / 1000);
+  },
+  onStatus(status) {
+    connectionStatus = status;
+    $("error").textContent = status.error ?? "";
+  },
+});
+client.setMode($("source").value);
+client.setManualValue(+$("intensity").value);
+client.setManualQuality(+$("quality").value);
+
+// ---------- session flow ----------
+let current = director.snapshot(performance.now() / 1000);
+let summaryShown = false;
+function begin() {
+  director.config.duration = +$("duration").value;
+  director.start();
+  summaryShown = false;
+  $("position").disabled = true;
+  $("overlay").classList.add("hidden");
+  $("pause").textContent = "Pause";
+  setState("The room is listening. You can reset at any time.");
+  if (!renderer.xr.isPresenting) $("crosshair").classList.remove("hidden");
+}
+function reset() {
+  director.reset();
+  summaryShown = false;
+  $("position").disabled = false;
+  $("overlay").classList.remove("hidden");
+  $("summaryPanel").classList.add("hidden");
+  $("crosshair").classList.add("hidden");
+  $("interactHint").classList.add("hidden");
+  $("pause").textContent = "Pause";
+  setState("Ready when you are.");
+}
+function togglePause() {
+  const now = performance.now() / 1000;
+  if (director.phase !== "running") return begin();
+  if (director.paused) {
+    director.resume(now);
+    $("pause").textContent = "Pause";
+    toast("Resumed");
+  } else {
+    director.pause(now);
+    $("pause").textContent = "Resume";
+    toast("Paused");
+  }
+}
+function setState(text) {
+  $("sessionState").textContent = text;
+}
+let toastTimer = 0;
+function toast(text) {
+  const el = $("toast");
+  el.textContent = text;
+  el.classList.add("hidden");
+  void el.offsetWidth; // restart the fade animation
+  el.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add("hidden"), 2600);
+}
+
+// ---------- end-of-session summary ----------
+function showSummary() {
+  const s = director.getSession();
+  const stats = Object.entries(s.encounterStats)
+    .filter(([, v]) => v.count > 0)
+    .map(
+      ([id, v]) =>
+        `<tr><td>${id}</td><td>${v.count}</td><td>${v.avgResponse > 0 ? "+" : ""}${v.avgResponse.toFixed(3)}</td></tr>`,
+    )
+    .join("");
+  $("summaryContent").innerHTML = `
+    <p>${s.endedReason === "completed" ? "Session completed." : "Session ended."}
+       Peak tension <strong>${s.peakTension.toFixed(2)}</strong> over ${Math.round(s.elapsed)}s.</p>
+    <table class="summary-table">
+      <tr><th>State</th><th>Seconds</th></tr>
+      ${Object.entries(s.timeInState)
+        .map(([k, v]) => `<tr><td>${k}</td><td>${v.toFixed(1)}</td></tr>`)
+        .join("")}
+    </table>
+    ${stats ? `<table class="summary-table"><tr><th>Encounter</th><th>Count</th><th>Avg response</th></tr>${stats}</table>` : "<p>No encounters fired.</p>"}
+    <p class="console-note">Derived control values only; no raw sensor data is stored.</p>`;
+  $("summaryPanel").classList.remove("hidden");
+}
+function download(name, text) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ---------- creator presets ----------
+const PRESET_KEY = "quietroom-preset";
+const PRESET_FIELDS = [
+  "low",
+  "high",
+  "duration",
+  "atmosphere",
+  "volume",
+  "position",
+  "scenario",
+];
+const PRESET_TOGGLES = ["sound", "lighting", "fog", "shadow"];
+function collectPreset() {
+  const p = {};
+  for (const f of PRESET_FIELDS) p[f] = $(f).value;
+  for (const t of PRESET_TOGGLES) p[t] = $(t).checked;
+  return p;
+}
+function applyPreset(p) {
+  if (!p || typeof p !== "object") return false;
+  for (const f of PRESET_FIELDS)
+    if (f in p && $(f)) {
+      $(f).value = p[f];
+      $(f).dispatchEvent(new Event("change"));
+    }
+  for (const t of PRESET_TOGGLES)
+    if (t in p && $(t) && t !== "sound") $(t).checked = !!p[t];
+  applyVolume();
+  return true;
+}
+
+// ---------- UI wiring ----------
+$("start").onclick = begin;
+$("reset").onclick = reset;
+$("pause").onclick = togglePause;
+$("sound").onchange = () => setSound($("sound").checked);
+$("volume").oninput = applyVolume;
+$("intensity").oninput = () => {
+  client.setManualValue(+$("intensity").value);
+  $("intensityValue").textContent = (+$("intensity").value).toFixed(2);
+};
+$("quality").oninput = () => {
+  client.setManualQuality(+$("quality").value);
+  $("qualityValue").textContent = (+$("quality").value).toFixed(2);
+};
+$("source").onchange = () => {
+  const mode = $("source").value;
+  director.input = null;
+  director.receivedAt = -Infinity;
+  client.setMode(mode);
+  $("intensity").disabled = mode !== "manual";
+  $("quality").disabled = mode !== "manual";
+};
+$("scenario").onchange = () => client.setScenario($("scenario").value);
+$("presetTense").onclick = () => {
+  $("intensity").value = 0.05;
+  $("intensity").dispatchEvent(new Event("input"));
+  toast("Build preset: low input, tension rises");
+};
+$("presetCalm").onclick = () => {
+  $("intensity").value = 0.95;
+  $("intensity").dispatchEvent(new Event("input"));
+  toast("Relief preset: high input, room eases");
+};
+$("duration").onchange = () => {
+  if (director.phase !== "running")
+    director.config.duration = +$("duration").value;
+};
+$("atmosphere").onchange = () => {
+  atmosphere.setPreset($("atmosphere").value);
+  toast(`Atmosphere: ${$("atmosphere").value}`);
+};
+for (const field of ["low", "high"])
+  $(field).onchange = () => {
+    const low = +$("low").value,
+      high = +$("high").value;
+    if (
+      !Number.isFinite(low) ||
+      !Number.isFinite(high) ||
+      low < 0 ||
+      high > 1 ||
+      high - low < 0.1
+    ) {
+      $("error").textContent =
+        "Thresholds must be 0-1, with high at least 0.10 above low.";
+      $(field).value = director.config[field];
+      return;
+    }
+    director.config.low = low;
+    director.config.high = high;
+    director.lowTime = director.highTime = 0;
+    $("error").textContent = "";
+  };
+$("helpToggle").onclick = () => {
+  const open = $("helpPanel").classList.toggle("hidden");
+  $("helpToggle").setAttribute("aria-expanded", String(!open));
+};
+$("consoleToggle").onclick = () => {
+  const el = $("directorConsole");
+  const collapsed = el.classList.contains("collapsed");
+  el.classList.toggle("collapsed", !collapsed);
+  el.classList.toggle("open", collapsed);
+  $("consoleToggle").setAttribute("aria-expanded", String(collapsed));
+};
+$("dismissSummary").onclick = () =>
+  $("summaryPanel").classList.add("hidden");
+$("exportSession").onclick = () => {
+  download("quiet-room-session.json", JSON.stringify(director.getSession(), null, 2));
+  toast("Session summary downloaded");
+};
+$("savePreset").onclick = () => {
+  localStorage.setItem(PRESET_KEY, JSON.stringify(collectPreset()));
+  toast("Preset saved in this browser");
+};
+$("exportPreset").onclick = () => {
+  download("quiet-room-preset.json", JSON.stringify(collectPreset(), null, 2));
+  toast("Preset downloaded");
+};
+$("resetPreset").onclick = () => {
+  localStorage.removeItem(PRESET_KEY);
+  applyPreset({
+    low: "0.30",
+    high: "0.75",
+    duration: "120",
+    atmosphere: "observatory",
+    volume: "0.6",
+    position: "back",
+    scenario: "cycle",
+    lighting: true,
+    fog: true,
+    shadow: true,
   });
-const body = new THREE.Mesh(new THREE.ConeGeometry(0.28, 1.4, 12), silhouette);
-body.position.y = 0.8;
-figure.add(body);
-const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 12), silhouette);
-head.position.y = 1.61;
-figure.add(head);
-figure.position.set(0, 0, -5.3);
-scene.add(figure);
-// In-world text and tracked-controller targets, independent of DOM overlays.
+  toast("Preset reset to defaults");
+};
+$("importPreset").onclick = () => {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json";
+  input.onchange = async () => {
+    try {
+      const parsed = JSON.parse(await input.files[0].text());
+      if (!applyPreset(parsed)) throw Error("not a preset object");
+      toast("Preset imported");
+    } catch (e) {
+      $("error").textContent = `Preset import failed: ${e.message}`;
+    }
+  };
+  input.click();
+};
+const saved = localStorage.getItem(PRESET_KEY);
+if (saved) {
+  try {
+    applyPreset(JSON.parse(saved));
+  } catch {
+    localStorage.removeItem(PRESET_KEY);
+  }
+}
+
+// ---------- keyboard ----------
+const held = new Set();
+addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  const k = e.key.toLowerCase();
+  if (["w", "a", "s", "d"].includes(k)) held.add(k);
+  else if (k === " ") {
+    e.preventDefault();
+    togglePause();
+  } else if (k === "r") reset();
+  else if (k === "1") $("presetTense").click();
+  else if (k === "2") $("presetCalm").click();
+  else if (k === "h") $("helpToggle").click();
+  else if (k === "e") interact();
+  else if (k === "f")
+    document.fullscreenElement
+      ? document.exitFullscreen()
+      : document.documentElement.requestFullscreen();
+});
+addEventListener("keyup", (e) => held.delete(e.key.toLowerCase()));
+
+// ---------- desktop look + walk ----------
+let dragging = false,
+  lastX = 0,
+  lastY = 0,
+  yaw = 0,
+  pitch = 0;
+camera.rotation.order = "YXZ";
+renderer.domElement.addEventListener("pointerdown", (e) => {
+  if (renderer.xr.isPresenting) return;
+  dragging = true;
+  lastX = e.clientX;
+  lastY = e.clientY;
+  renderer.domElement.setPointerCapture(e.pointerId);
+});
+renderer.domElement.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  yaw -= (e.clientX - lastX) * 0.003;
+  pitch = THREE.MathUtils.clamp(pitch - (e.clientY - lastY) * 0.003, -0.7, 0.7);
+  camera.rotation.set(pitch, yaw, 0);
+  lastX = e.clientX;
+  lastY = e.clientY;
+});
+renderer.domElement.addEventListener("pointerup", () => (dragging = false));
+renderer.domElement.addEventListener("pointercancel", () => (dragging = false));
+function walk(dt) {
+  if (renderer.xr.isPresenting || !held.size) return;
+  const speed = 1.8 * dt;
+  const fx = -Math.sin(yaw),
+    fz = -Math.cos(yaw);
+  let dx = 0,
+    dz = 0;
+  if (held.has("w")) (dx += fx), (dz += fz);
+  if (held.has("s")) (dx -= fx), (dz -= fz);
+  if (held.has("a")) (dx += fz), (dz -= fx);
+  if (held.has("d")) (dx -= fz), (dz += fx);
+  if (!dx && !dz) return;
+  const n = Math.hypot(dx, dz);
+  rig.position.x = THREE.MathUtils.clamp(
+    rig.position.x + (dx / n) * speed,
+    -3.1,
+    3.1,
+  );
+  rig.position.z = THREE.MathUtils.clamp(
+    rig.position.z + (dz / n) * speed,
+    -5.0,
+    3.1,
+  );
+}
+
+// ---------- interaction (desktop crosshair + XR controllers) ----------
+const raycaster = new THREE.Raycaster();
+const interactableMeshes = environment.interactables.map((i) => i.mesh);
+const byId = Object.fromEntries(
+  environment.interactables.map((i) => [i.id, i]),
+);
+function aimedInteractable(origin, direction) {
+  raycaster.set(origin, direction);
+  raycaster.far = 4.5;
+  const hit = raycaster.intersectObjects(interactableMeshes, true)[0];
+  if (!hit) return null;
+  let o = hit.object;
+  while (o && !o.userData.interactableId) o = o.parent;
+  return o ? byId[o.userData.interactableId] : null;
+}
+const aimOrigin = new THREE.Vector3(),
+  aimDir = new THREE.Vector3();
+function desktopAim() {
+  camera.getWorldPosition(aimOrigin);
+  camera.getWorldDirection(aimDir);
+  return aimedInteractable(aimOrigin, aimDir);
+}
+function interact() {
+  if (renderer.xr.isPresenting) return;
+  const target = desktopAim();
+  if (target) {
+    target.onInteract();
+    toast(target.label);
+  }
+}
+
+// ---------- in-world HUD and XR target panels ----------
 function panel(width, height, canvasWidth, canvasHeight) {
   const canvas = document.createElement("canvas");
   canvas.width = canvasWidth;
@@ -149,88 +503,13 @@ function target(text, x, action) {
   scene.add(p.mesh);
   return p;
 }
-let audio = null,
-  audioEnabled = false,
-  mode = "manual",
-  lastSignal = null,
-  receivedAt = -Infinity,
-  socket = null,
-  retryTimer = null,
-  socketGeneration = 0,
-  retryMs = 500,
-  connection = "disconnected",
-  lastTime = performance.now(),
-  lastHud = 0,
-  current = {
-    state: "WAIT",
-    phase: "ready",
-    source: "manual",
-    intensity: 0.5,
-    tension: 0.12,
-    quality: 1,
-    remaining: 120,
-    fresh: true,
-  };
-function begin() {
-  director.start();
-  $("position").disabled = true;
-  lastSignal = null;
-  receivedAt = -Infinity;
-  $("sessionState").textContent =
-    "The room is listening. You can reset at any time.";
-}
-function reset() {
-  director.reset();
-  $("position").disabled = false;
-  lastSignal = null;
-  receivedAt = -Infinity;
-  $("sessionState").textContent = "Ready when you are.";
-}
-function makeAudio() {
-  const context = new AudioContext(),
-    gain = context.createGain(),
-    panner = context.createPanner();
-  panner.panningModel = "HRTF";
-  panner.distanceModel = "inverse";
-  panner.refDistance = 2;
-  panner.maxDistance = 15;
-  gain.gain.value = 0;
-  panner.connect(context.destination);
-  gain.connect(panner);
-  for (const frequency of [56, 84.3]) {
-    const osc = context.createOscillator();
-    osc.type = "sine";
-    osc.frequency.value = frequency;
-    osc.connect(gain);
-    osc.start();
-  }
-  return { context, gain, panner };
-}
-async function setSound(value) {
-  try {
-    if (value) {
-      audio ??= makeAudio();
-      await audio.context.resume();
-    }
-    audioEnabled = value;
-    if (audio && !value)
-      audio.gain.gain.setTargetAtTime(0, audio.context.currentTime, 0.1);
-    $("sound").checked = value;
-  } catch (e) {
-    audioEnabled = false;
-    $("sound").checked = false;
-    $("error").textContent = `Audio unavailable: ${e.message}`;
-  }
-}
 const startTarget = target("BEGIN / RESET", -0.4, () => {
   if (director.phase === "running") reset();
   else begin();
 });
 const soundTarget = target("SOUND: OFF", 0.4, () => setSound(!audioEnabled));
 const targets = [startTarget.mesh, soundTarget.mesh];
-const raycaster = new THREE.Raycaster(),
-  rotation = new THREE.Matrix4();
-const controllers = [];
+const xrRotation = new THREE.Matrix4();
 for (let i = 0; i < 2; i++) {
   const controller = renderer.xr.getController(i);
   rig.add(controller);
@@ -244,14 +523,17 @@ for (let i = 0; i < 2; i++) {
   line.scale.z = 5;
   controller.add(line);
   controller.addEventListener("selectstart", () => {
-    rotation.identity().extractRotation(controller.matrixWorld);
-    raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(rotation);
-    const hit = raycaster.intersectObjects(targets)[0];
-    if (hit) hit.object.userData.action();
-    else if (director.phase !== "running") begin();
+    xrRotation.identity().extractRotation(controller.matrixWorld);
+    aimOrigin.setFromMatrixPosition(controller.matrixWorld);
+    aimDir.set(0, 0, -1).applyMatrix4(xrRotation);
+    raycaster.set(aimOrigin, aimDir);
+    raycaster.far = 20;
+    const panelHit = raycaster.intersectObjects(targets)[0];
+    if (panelHit) return panelHit.object.userData.action();
+    const interactable = aimedInteractable(aimOrigin, aimDir);
+    if (interactable) return interactable.onInteract();
+    if (director.phase !== "running") begin();
   });
-  controllers.push(controller);
 }
 const buttonDown = new Map();
 function controllerButtons() {
@@ -261,153 +543,20 @@ function controllerButtons() {
     buttonDown.set(source, pressed);
   }
 }
-function connect() {
-  clearTimeout(retryTimer);
-  const generation = ++socketGeneration;
-  connection = "connecting";
-  const ws = new WebSocket(
-    `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/signals`,
-  );
-  socket = ws;
-  ws.onopen = () => {
-    if (generation !== socketGeneration) return;
-    connection = "connected";
-    retryMs = 500;
-  };
-  ws.onmessage = (e) => {
-    if (generation !== socketGeneration || mode !== "live") return;
-    try {
-      const message = JSON.parse(e.data);
-      if (!validSignal(message)) throw Error("Invalid signal packet");
-      lastSignal = message;
-      receivedAt = performance.now() / 1000;
-      $("error").textContent = "";
-    } catch (e) {
-      $("error").textContent = e.message;
-    }
-  };
-  ws.onerror = () => ws.close();
-  ws.onclose = () => {
-    if (generation !== socketGeneration) return;
-    connection = "disconnected";
-    if (mode === "live") {
-      retryTimer = setTimeout(connect, retryMs);
-      retryMs = Math.min(10000, retryMs * 2);
-    }
-  };
-}
-function selectSource() {
-  mode = $("source").value;
-  director.input = null;
-  director.receivedAt = -Infinity;
-  director.lowTime = director.highTime = 0;
-  director.state = "WAIT";
-  director.reliefLeft = 0;
-  lastSignal = null;
-  receivedAt = -Infinity;
-  clearTimeout(retryTimer);
-  socketGeneration++;
-  if (socket) {
-    socket.onclose = null;
-    socket.close();
-  }
-  socket = null;
-  connection = "disconnected";
-  $("intensity").disabled = mode !== "manual";
-  if (mode === "live") connect();
-}
-$("source").onchange = selectSource;
-$("start").onclick = begin;
-$("reset").onclick = reset;
-$("sound").onchange = () => setSound($("sound").checked);
-$("intensity").oninput = () =>
-  ($("intensityValue").textContent = Number($("intensity").value).toFixed(2));
-for (const field of ["low", "high"])
-  $(field).onchange = () => {
-    const low = +$("low").value,
-      high = +$("high").value;
-    if (
-      !Number.isFinite(low) ||
-      !Number.isFinite(high) ||
-      low < 0 ||
-      high > 1 ||
-      high - low < 0.1
-    ) {
-      $("error").textContent =
-        "Thresholds must be 0–1, with high at least 0.10 above low.";
-      $(field).value = director.config[field];
-      return;
-    }
-    director.config.low = low;
-    director.config.high = high;
-    director.lowTime = director.highTime = 0;
-    $("error").textContent = "";
-  };
-// Desktop mouse-look only. No forced camera travel or unexpected world motion.
-let dragging = false,
-  lastX = 0,
-  lastY = 0,
-  yaw = 0,
-  pitch = 0;
-camera.rotation.order = "YXZ";
-renderer.domElement.addEventListener("pointerdown", (e) => {
-  if (renderer.xr.isPresenting) return;
-  dragging = true;
-  lastX = e.clientX;
-  lastY = e.clientY;
-  renderer.domElement.setPointerCapture(e.pointerId);
-});
-renderer.domElement.addEventListener("pointermove", (e) => {
-  if (!dragging) return;
-  yaw -= (e.clientX - lastX) * 0.003;
-  pitch = THREE.MathUtils.clamp(pitch - (e.clientY - lastY) * 0.003, -0.7, 0.7);
-  camera.rotation.set(pitch, yaw, 0);
-  lastX = e.clientX;
-  lastY = e.clientY;
-});
-renderer.domElement.addEventListener("pointerup", () => (dragging = false));
-renderer.domElement.addEventListener("pointercancel", () => (dragging = false));
 renderer.xr.addEventListener("sessionstart", () => {
   camera.position.set(0, 0, 0);
   camera.rotation.set(0, 0, 0);
-  $("overlay").style.display = "none";
+  $("overlay").classList.add("hidden");
+  $("crosshair").classList.add("hidden");
+  $("interactHint").classList.add("hidden");
 });
 renderer.xr.addEventListener("sessionend", () => {
   camera.position.set(0, 1.6, 0);
   camera.rotation.set(pitch, yaw, 0);
-  $("overlay").style.display = "";
+  if (director.phase !== "running") $("overlay").classList.remove("hidden");
   buttonDown.clear();
 });
-const position = new THREE.Vector3(),
-  quaternion = new THREE.Quaternion(),
-  forward = new THREE.Vector3(),
-  up = new THREE.Vector3();
-function updateAudio(tension, active) {
-  if (!audio) return;
-  const { context, gain, panner } = audio;
-  const level = audioEnabled && active ? 0.006 + tension * 0.014 : 0;
-  gain.gain.setTargetAtTime(level, context.currentTime, 0.3);
-  panner.positionX.value = figure.position.x;
-  panner.positionY.value = 1.3;
-  panner.positionZ.value = figure.position.z;
-  const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
-  cam.getWorldPosition(position);
-  cam.getWorldQuaternion(quaternion);
-  forward.set(0, 0, -1).applyQuaternion(quaternion);
-  up.set(0, 1, 0).applyQuaternion(quaternion);
-  const listener = context.listener;
-  if (listener.positionX) {
-    listener.positionX.value = position.x;
-    listener.positionY.value = position.y;
-    listener.positionZ.value = position.z;
-    listener.forwardX.value = forward.x;
-    listener.forwardY.value = forward.y;
-    listener.forwardZ.value = forward.z;
-    listener.upX.value = up.x;
-    listener.upY.value = up.y;
-    listener.upZ.value = up.z;
-  }
-}
+
 function drawHud(s) {
   const ctx = hud.ctx;
   ctx.clearRect(0, 0, 1024, 512);
@@ -415,13 +564,19 @@ function drawHud(s) {
   ctx.fillRect(0, 0, 1024, 512);
   ctx.strokeStyle = "#5f7655";
   ctx.strokeRect(3, 3, 1018, 506);
+  ctx.textAlign = "left";
   ctx.fillStyle = "#c6d7ad";
   ctx.font = "32px sans-serif";
   ctx.fillText("FOCUSED / THE QUIET ROOM", 38, 65);
   ctx.fillStyle = "#e2e7dc";
   ctx.font = "48px sans-serif";
-  ctx.fillText(`${s.state}    ${Math.ceil(s.remaining)}s`, 38, 140);
+  ctx.fillText(
+    `${s.state}${s.paused ? " (PAUSED)" : ""}    ${Math.ceil(s.remaining)}s`,
+    38,
+    140,
+  );
   ctx.font = "30px sans-serif";
+  const mode = client.stats().mode ?? "manual";
   const src = mode === "live" ? s.source : mode;
   ctx.fillText(
     `SOURCE: ${src.toUpperCase()}${src === "hardware" ? " (bridge-reported)" : " / DEMO"}`,
@@ -434,7 +589,7 @@ function drawHud(s) {
     260,
   );
   ctx.fillText(
-    `QUALITY ${s.quality.toFixed(2)}    ${s.fresh ? "FRESH" : "NO FRESH SIGNAL"}`,
+    `QUALITY ${s.quality.toFixed(2)}    ${s.fresh ? "FRESH" : "NO FRESH SIGNAL"}${s.encounter ? `    [${s.encounter.id}]` : ""}`,
     38,
     315,
   );
@@ -445,14 +600,14 @@ function drawHud(s) {
       ? "Complete. Point at BEGIN / RESET to try again."
       : s.phase === "ready"
         ? "Point and trigger BEGIN. A/X toggles sound."
-        : "Point and trigger buttons. A/X toggles sound.",
+        : "Trigger buttons or props. A/X toggles sound.",
     38,
     385,
   );
   ctx.fillText(
     s.state === "WAIT"
       ? "Waiting: atmosphere eases off."
-      : `Sound ${audioEnabled ? "ON" : "OFF"} · Experimental response proxy`,
+      : `Sound ${audioEnabled ? "ON" : "OFF"} - Experimental response proxy`,
     38,
     438,
   );
@@ -461,81 +616,135 @@ function drawHud(s) {
   soundTarget.ctx.fillStyle = "#243429";
   soundTarget.ctx.fillRect(0, 0, 650, 160);
   soundTarget.ctx.fillStyle = "#e0e9d3";
+  soundTarget.ctx.textAlign = "center";
+  soundTarget.ctx.font = "38px sans-serif";
   soundTarget.ctx.fillText(`SOUND: ${audioEnabled ? "ON" : "OFF"}`, 325, 95);
   soundTarget.texture.needsUpdate = true;
 }
+
+// ---------- encounter -> entity routing ----------
+let lastEncounterKey = null;
+let lampFlicker = 0;
+function routeEncounter(s) {
+  const key = s.encounter ? `${s.encounter.id}:${s.encounter.t <= 0.2}` : null;
+  if (!s.encounter) {
+    lastEncounterKey = null;
+    return;
+  }
+  const fresh = s.encounter.t <= 0.2 && lastEncounterKey !== s.encounter.id;
+  if (!fresh) return;
+  lastEncounterKey = s.encounter.id;
+  const e = s.encounter;
+  if (e.id === "lamp-flicker") lampFlicker = 1.6;
+  if (e.id === "door-creak") byId["corridor-door"]?.onInteract();
+  if (e.id === "radio-static") {
+    const radio = byId.radio;
+    if (radio && !radio.mesh.userData.active) radio.onInteract();
+  }
+  if (e.intensity >= 0.85) attendant.trigger("advance");
+  if (e.intensity >= 0.97 && s.tension > 0.8) attendant.trigger("scare");
+}
+
+// ---------- stats ----------
+let fpsAccum = 0,
+  fpsFrames = 0,
+  fpsValue = 0;
+function updateStats(s) {
+  const stats = client.stats();
+  $("sourceStat").textContent = (
+    stats.mode === "live" ? s.source : (stats.mode ?? "manual")
+  ).toUpperCase();
+  $("stateStat").textContent = s.paused ? `${s.state} ⏸` : s.state;
+  $("tensionStat").textContent = s.tension.toFixed(2);
+  $("qualityStat").textContent = s.quality.toFixed(2);
+  $("encounterStat").textContent = s.encounter ? s.encounter.id : "–";
+  $("fpsStat").textContent = fpsValue ? fpsValue.toFixed(0) : "–";
+  $("rateStat").textContent = `${stats.receiveRate.toFixed(1)} Hz`;
+  $("signalAgeStat").textContent =
+    stats.lastSignalAgeMs == null
+      ? "–"
+      : `${(stats.lastSignalAgeMs / 1000).toFixed(1)}s`;
+  const sec = Math.ceil(s.remaining);
+  $("timeStat").textContent =
+    `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+  $("progressBar").setAttribute("aria-valuenow", Math.round(s.progress * 100));
+  $("progressBar").querySelector(".progress-fill").style.width =
+    `${(s.progress * 100).toFixed(1)}%`;
+  $("connection").textContent =
+    stats.mode === "live"
+      ? `Relay ${connectionStatus.connection} · ${s.fresh ? "receiving" : "waiting for fresh input"}`
+      : `${(stats.mode ?? "manual").toUpperCase()} DEMO · no hardware claim`;
+}
+
+// ---------- render loop ----------
+let lastTime = performance.now(),
+  lastHud = 0,
+  lastAim = 0;
 renderer.setAnimationLoop((time) => {
   const now = performance.now() / 1000,
     dt = Math.min(0.1, Math.max(0, (performance.now() - lastTime) / 1000));
   lastTime = performance.now();
-  if (director.phase === "running") {
-    if (mode !== "live") {
-      const intensity =
-        mode === "manual"
-          ? +$("intensity").value
-          : 0.5 + 0.48 * Math.sin(director.elapsed * 0.18);
-      director.receive(
-        {
-          type: "signal",
-          source: mode,
-          intensity,
-          signal_quality: 1,
-          timestamp: Date.now() / 1000,
-        },
-        now,
-      );
-    } else if (lastSignal && now - receivedAt <= director.config.freshness) {
-      director.receive(lastSignal, receivedAt);
-    }
+  fpsAccum += dt;
+  fpsFrames++;
+  if (fpsAccum >= 0.5) {
+    fpsValue = fpsFrames / fpsAccum;
+    fpsAccum = 0;
+    fpsFrames = 0;
   }
   current = director.step(dt, now);
-  if (current.phase === "ended") $("position").disabled = false;
-  const active = current.phase === "running",
+  const active = current.phase === "running" && !current.paused,
     t = active ? current.tension : 0;
-  hud.mesh.visible = renderer.xr.isPresenting;
-  targets.forEach((target) => (target.visible = renderer.xr.isPresenting));
   const safe = active && current.state !== "WAIT";
-  // Gentle dimming; slow irregular modulation avoids rapid strobing.
-  const modulation =
-    $("lighting").checked && safe
-      ? 1 -
-        0.1 *
-          t *
-          (0.5 + 0.5 * Math.sin(time * 0.0037) * Math.sin(time * 0.0021))
-      : 1;
-  ambient.intensity = $("lighting").checked ? 0.65 - t * 0.5 : 0.65;
-  lamp.intensity = ($("lighting").checked ? 20 - t * 17 : 20) * modulation;
-  windowLight.intensity = 8 - t * 4;
-  scene.fog.density = $("fog").checked ? 0.035 + t * 0.1 : 0.035;
-  figure.visible = $("shadow").checked && safe && t > 0.45;
-  silhouette.opacity = THREE.MathUtils.clamp((t - 0.4) * 2, 0, 0.85);
-  const loc = $("position").value;
-  figure.position.set(
-    loc === "left" ? -2.7 : loc === "right" ? 2.7 : 0,
-    0,
-    loc === "back" ? -5.3 : -4.7,
-  );
+  const visuals = {
+    tension: t,
+    state: current.state,
+    elapsed: current.elapsed,
+    lighting: $("lighting").checked,
+    fog: $("fog").checked,
+    shadow: $("shadow").checked,
+    shadowPosition: $("position").value,
+    quality: current.quality,
+    phase: time / 1000,
+    xrPresenting: renderer.xr.isPresenting,
+  };
+  walk(dt);
+  environment.update(dt, time / 1000, visuals);
+  atmosphere.update(dt, time / 1000, visuals);
+  attendant.update(dt, time / 1000, active ? visuals : { ...visuals, tension: 0, state: "WAIT" });
+  ghost.update(dt, time / 1000, visuals);
+  monitor.update(dt, time / 1000, visuals);
+  if (lampFlicker > 0) {
+    lampFlicker = Math.max(0, lampFlicker - dt);
+    lamp.intensity *= 0.35 + 0.65 * Math.abs(Math.sin(time * 0.05));
+  }
+  lampCone.updateFrom(lamp);
+  lampCone.setIntensity(visuals.lighting ? 0.35 + 0.4 * (1 - t) : 0.5);
+  routeEncounter(current);
+  if (current.phase === "ended") {
+    $("position").disabled = false;
+    if (!summaryShown) {
+      summaryShown = true;
+      $("crosshair").classList.add("hidden");
+      $("interactHint").classList.add("hidden");
+      setState("The room settles. Experience complete.");
+      if (!renderer.xr.isPresenting) showSummary();
+    }
+  }
+  hud.mesh.visible = renderer.xr.isPresenting;
+  targets.forEach((m) => (m.visible = renderer.xr.isPresenting));
   if (renderer.xr.isPresenting) controllerButtons();
-  updateAudio(t, safe);
+  audio.update(current, renderer.xr.isPresenting ? renderer.xr.getCamera() : camera);
+  musicBox.update(current);
+  if (!renderer.xr.isPresenting && active && time - lastAim > 150) {
+    lastAim = time;
+    const aimed = desktopAim();
+    $("interactHint").classList.toggle("hidden", !aimed);
+    if (aimed) $("interactHint").textContent = `Press E — ${aimed.label}`;
+  }
   if (time - lastHud > 150) {
     lastHud = time;
     drawHud(current);
-    $("sourceStat").textContent = (
-      mode === "live" ? current.source : mode
-    ).toUpperCase();
-    $("stateStat").textContent = current.state;
-    $("tensionStat").textContent = current.tension.toFixed(2);
-    $("qualityStat").textContent = current.quality.toFixed(2);
-    const sec = Math.ceil(current.remaining);
-    $("timeStat").textContent =
-      `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
-    $("connection").textContent =
-      mode === "live"
-        ? `Relay ${connection} · ${current.fresh ? "receiving" : "waiting for fresh input"}`
-        : `${mode.toUpperCase()} DEMO · no hardware claim`;
-    if (current.phase === "ended")
-      $("sessionState").textContent =
-        "The room settles. Experience complete. Reset to begin again.";
+    updateStats(current);
   }
   renderer.render(scene, camera);
 });
@@ -545,8 +754,7 @@ window.addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 window.addEventListener("pagehide", () => {
-  clearTimeout(retryTimer);
-  socketGeneration++;
-  socket?.close();
-  audio?.context.close();
+  client.dispose();
+  audio.dispose();
+  musicBox.dispose();
 });
