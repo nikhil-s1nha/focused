@@ -22,26 +22,36 @@ importmap, no CDN, Quest 3S budgets):
 | ghost.mjs | done | PEAK apparition (port of bridge-horror-house Ghost.js, MIT), corridor-only stalk, never past z 0.5 |
 | volumetrics.mjs | done | stereo-safe volumetric light cone (threex.volumetricspotlight, MIT) |
 | monitor.mjs | done | CRT security monitor: render-target corridor feed, static rises with tension, RT skipped in XR by default |
-| textures.mjs | agent in flight | createMaterialLibrary → 8 procedural materials (bridge-horror-house Textures.js techniques) |
-| atmosphere.mjs | agent in flight | observatory/cold/ember grading presets, ~2 s glide, desktop vignette overlay hidden in XR |
-| app.mjs | REWRITTEN, unverified | composes everything + full UI wiring, WASD, E-interact crosshair, keyboard shortcuts, presets, summary panel. Imports textures.mjs and atmosphere.mjs, so the page 404s until those two land |
+| textures.mjs | done | createMaterialLibrary → 8 deterministic procedural materials (bridge-horror-house techniques, MIT credit) |
+| atmosphere.mjs | done | observatory/cold/ember grading presets, ~2 s glide, desktop vignette overlay hidden in XR |
+| app.mjs | done + VERIFIED | composes everything + full UI wiring, WASD, E-interact crosshair, keyboard shortcuts, presets, summary panel |
 
 Also: index.html/style.css rebuilt (room-first studio console, all control IDs
 wired by app.mjs), test-xr/ Playwright+IWER harness (in flight),
 scripts/quest-usb.sh (`npm run quest` sets up adb reverse for the headset).
 
-## Immediate next steps (in order)
+## Verification completed (2026-10-17, this machine)
 
-1. Confirm textures.mjs + atmosphere.mjs exist and `npm test` is fully green.
-2. Serve (`npm start`), open http://127.0.0.1:8080, fix any runtime wiring
-   errors in app.mjs (it was written against the module specs; verify against
-   delivered APIs; check browser console).
-3. Walk the demo: Begin → slider low → PEAK (corridor extends, Attendant wakes,
-   ghost in corridor, monitor static) → slider high → RELIEF → `npm run mock`
-   live mode → stop feed → WAIT → 120 s ending → summary panel.
-4. `npm run test:xr` (Playwright+IWER emulated-Quest suite; `npm run
-   test:xr:install` first time).
-5. Commit; push needs the repo owner's GitHub auth.
+- `npm test`: 94/94 unit tests green.
+- `npm run test:xr`: 9/9 green in headless Chromium — includes emulated-Quest
+  (IWER metaQuest3) VR entry, stereo both-eyes render, head-pose view change,
+  controller trigger, and perf budget (119 draw calls/eye vs 150 budget), plus
+  the full desktop demo flow e2e (test-xr/demo-flow.test.mjs): begin → PEAK
+  with encounters → RELIEF → quality-drop WAIT → recovery → 60 s ending →
+  summary panel → reset, zero console errors.
+- Desktop browser inspected live: room renders with textures/volumetric lamp
+  cone/dust, onboarding card, console, diagnostics all working. Note: the
+  director clock only advances during rendered frames, so a hidden/background
+  tab intentionally freezes the session (not a bug).
+- A stale pre-session server squatting port 8080 (old content) was killed.
+
+## Remaining next steps
+
+1. `git push -u origin vr-scene-expansion` (needs repo owner's GitHub auth).
+2. Optional polish: live-mode `npm run mock` walkthrough, audio listen-through,
+   tune encounter→Attendant/ghost trigger thresholds after a human playthrough.
+3. Milestone 2 (physical Quest 3S): `npm run quest`, then README acceptance
+   checklist. test-xr proves the code path; the headset proves comfort/feel.
 
 ## User preferences (also in Claude memory on the original machine)
 
