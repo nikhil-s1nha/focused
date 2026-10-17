@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Focused / The Quiet Room</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/vendor/three.module.js",
+          "three/addons/": "/vendor/addons/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="viewport"></div>
+    <main id="overlay">
+      <header>
+        <a href="/"
+          >◉ FOCUSED <span>PHYSIOLOGICAL ADAPTATION / PROTOTYPE 01</span></a
+        ><span class="tag">QUEST 3S / WEBXR</span>
+      </header>
+      <section class="title">
+        <p class="eyebrow">AN EXPERIMENT IN RESPONSIVE ATMOSPHERE</p>
+        <h1>The quiet<br /><i>room.</i></h1>
+        <p class="description">
+          Stay a while. The room listens.<br />A two-minute adaptive VR
+          experience.
+        </p>
+        <div id="sessionState" role="status">Ready when you are.</div>
+        <div class="row">
+          <button id="start" class="primary">Begin experience ↗</button
+          ><button id="reset">Reset</button>
+        </div>
+      </section>
+      <aside>
+        <p class="eyebrow">DIRECTOR CONSOLE</p>
+        <label
+          >INPUT SOURCE<select id="source">
+            <option value="manual">Manual demo</option>
+            <option value="synthetic">Synthetic demo</option>
+            <option value="live">Live stream</option>
+          </select></label
+        ><label
+          >RESPONSE PROXY <output id="intensityValue">0.50</output
+          ><input
+            id="intensity"
+            type="range"
+            min="0"
+            max="1"
+            step=".01"
+            value=".5"
+        /></label>
+        <p class="help">
+          Low input builds tension. Sustained high input creates relief. This is
+          a control proxy, not a fear measurement.
+        </p>
+        <label class="check"
+          ><input type="checkbox" id="sound" /> Opt in to spatial sound</label
+        >
+        <details>
+          <summary>Creator settings</summary>
+          <label class="check"
+            ><input type="checkbox" id="lighting" checked /> Adaptive
+            lighting</label
+          ><label class="check"
+            ><input type="checkbox" id="fog" checked /> Adaptive fog</label
+          ><label class="check"
+            ><input type="checkbox" id="shadow" checked /> Shadow
+            encounter</label
+          ><label
+            >SHADOW POSITION<select id="position">
+              <option value="back">Back doorway</option>
+              <option value="left">Left corner</option>
+              <option value="right">Right corner</option>
+            </select></label
+          ><label
+            >LOW THRESHOLD
+            <input
+              id="low"
+              type="number"
+              min="0"
+              max="0.6"
+              step=".05"
+              value=".30" /></label
+          ><label
+            >HIGH THRESHOLD
+            <input
+              id="high"
+              type="number"
+              min=".65"
+              max="1"
+              step=".05"
+              value=".75"
+          /></label>
+        </details>
+        <p id="connection" class="help">Manual demo · no hardware connected</p>
+        <p id="error" role="alert"></p>
+      </aside>
+      <section class="diagnostics">
+        <div><small>SOURCE</small><strong id="sourceStat">MANUAL</strong></div>
+        <div><small>DIRECTOR</small><strong id="stateStat">WAIT</strong></div>
+        <div><small>TENSION</small><strong id="tensionStat">0.12</strong></div>
+        <div><small>QUALITY</small><strong id="qualityStat">1.00</strong></div>
+        <div><small>TIME LEFT</small><strong id="timeStat">2:00</strong></div>
+      </section>
+      <footer>
+        <span
+          >Drag to look · No forced movement · In VR: trigger to begin/reset,
+          A/X to toggle sound</span
+        ><span>Simulated input is always labeled.</span>
+      </footer>
+    </main>
+    <script type="module" src="/app.mjs"></script>
+  </body>
+</html>

@@ -1,0 +1,294 @@
+:root {
+  font-family: Arial, sans-serif;
+  color: #e2dfd3;
+  background: #090b0b;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+#viewport {
+  position: fixed;
+  inset: 0;
+}
+canvas {
+  display: block;
+}
+#overlay {
+  position: relative;
+  pointer-events: none;
+  padding: 30px 38px;
+  min-height: 100vh;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+header a {
+  font-size: 18px;
+  letter-spacing: 3px;
+  color: #e3e2d6;
+  text-decoration: none;
+  pointer-events: auto;
+}
+header a span {
+  margin-left: 24px;
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: #92998f;
+}
+.tag {
+  font-size: 9px;
+  letter-spacing: 2px;
+  border: 1px solid #535950;
+  padding: 10px 14px;
+  border-radius: 20px;
+}
+.title {
+  position: absolute;
+  top: 19vh;
+  left: 38px;
+  max-width: 340px;
+}
+.eyebrow {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: #abb49e;
+}
+h1 {
+  font:
+    400 clamp(56px, 7vw, 100px)/0.95 Georgia,
+    serif;
+  letter-spacing: -3px;
+  margin: 28px 0;
+}
+h1 i {
+  font-weight: 400;
+  color: #bfc6ac;
+}
+.description {
+  font-size: 12px;
+  line-height: 1.9;
+  color: #9aab9d;
+}
+#sessionState {
+  font-size: 11px;
+  margin-top: 30px;
+  color: #bac4ac;
+  max-width: 260px;
+  line-height: 1.7;
+}
+.row {
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}
+button,
+select,
+input[type="number"] {
+  color: #e0e4d7;
+  background: #17201ddd;
+  border: 1px solid #4b584b;
+  border-radius: 4px;
+  font: 11px Arial;
+  padding: 12px;
+  margin-top: 10px;
+  cursor: pointer;
+}
+.primary {
+  background: #b6c59c;
+  color: #1b2219;
+  border: 0;
+}
+button:hover {
+  filter: brightness(1.2);
+}
+aside {
+  position: absolute;
+  right: 38px;
+  top: 21vh;
+  width: 235px;
+  padding: 20px;
+  background: #111916bd;
+  border: 1px solid #354236;
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+label {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  color: #a5b29e;
+  margin-top: 18px;
+}
+select {
+  display: block;
+  width: 100%;
+  margin-top: 9px;
+  padding: 9px;
+}
+input[type="range"] {
+  display: block;
+  width: 100%;
+  accent-color: #c0cc9f;
+  margin: 14px 0;
+}
+output {
+  float: right;
+}
+.help {
+  font-size: 10px;
+  line-height: 1.7;
+  color: #91a18e;
+}
+.check {
+  font-size: 10px;
+  letter-spacing: 0;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.check input {
+  accent-color: #b5c797;
+}
+details {
+  border-top: 1px solid #3b483b;
+  margin-top: 20px;
+  padding-top: 15px;
+}
+summary {
+  font-size: 10px;
+  color: #b9c5ad;
+  cursor: pointer;
+}
+input[type="number"] {
+  width: 100%;
+  padding: 7px;
+}
+#error {
+  font-size: 10px;
+  color: #e5b4a5;
+}
+.diagnostics {
+  position: fixed;
+  left: 38px;
+  right: 38px;
+  bottom: 67px;
+  display: flex;
+  gap: 55px;
+  border-top: 1px solid #3a453b;
+  padding-top: 18px;
+}
+.diagnostics small {
+  display: block;
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: #84947f;
+}
+.diagnostics strong {
+  display: block;
+  font-weight: 400;
+  font-size: 17px;
+  margin-top: 9px;
+}
+footer {
+  position: fixed;
+  bottom: 24px;
+  left: 38px;
+  right: 38px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #7e8f7d;
+}
+#VRButton {
+  z-index: 10 !important;
+  bottom: 65px !important;
+  left: auto !important;
+  right: 38px !important;
+  width: 165px !important;
+  background: #202a20dd !important;
+  border: 1px solid #a2b28e !important;
+  font: 11px Arial !important;
+}
+@media (max-width: 760px) {
+  #overlay {
+    padding: 20px;
+  }
+  header a span,
+  .tag {
+    display: none;
+  }
+  .title {
+    left: 20px;
+    top: 14vh;
+    width: 180px;
+  }
+  h1 {
+    font-size: 62px;
+  }
+  .title .eyebrow {
+    max-width: 140px;
+    line-height: 1.5;
+  }
+  aside {
+    right: 20px;
+    top: 18vh;
+    width: 180px;
+    padding: 14px;
+  }
+  .diagnostics {
+    left: 20px;
+    right: 20px;
+    gap: 20px;
+    bottom: 65px;
+  }
+  .diagnostics strong {
+    font-size: 12px;
+  }
+  .diagnostics small {
+    font-size: 7px;
+  }
+  footer {
+    left: 20px;
+    right: 20px;
+    bottom: 14px;
+    font-size: 8px;
+    max-width: 60%;
+    line-height: 1.5;
+  }
+  footer span:last-child {
+    display: none;
+  }
+  #VRButton {
+    bottom: 150px !important;
+    right: 20px !important;
+    width: 145px !important;
+  }
+}
+@media (max-height: 700px) {
+  aside {
+    top: 110px;
+  }
+  aside label {
+    margin-top: 10px;
+  }
+  .title {
+    top: 110px;
+  }
+  h1 {
+    margin: 15px 0;
+    font-size: 64px;
+  }
+  #sessionState {
+    margin-top: 15px;
+  }
+  details {
+    max-height: 130px;
+    overflow: auto;
+  }
+}
