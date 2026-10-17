@@ -127,3 +127,56 @@ test("reset returns a clean idle session with no phone, scare or events", () => 
   assert.deepEqual(s.consumeEvents(), []);
   assert.equal(s.start(), true);
 });
+
+import { applyPress } from "../public/fnaf-session.mjs";
+
+test("applyPress: FNAF1 office buttons toggle the matching engine controls", () => {
+  const s = new FnafSession({ mode: "fnaf1", rng: seeded(1) });
+  assert.equal(applyPress(s, "door-left"), true);
+  assert.equal(s.controls.doorL, true);
+  applyPress(s, "door-left");
+  assert.equal(s.controls.doorL, false);
+  applyPress(s, "monitor");
+  assert.equal(s.controls.monitor, true);
+  applyPress(s, "camera", { room: "cove" });
+  assert.equal(s.controls.room, "cove");
+  assert.equal(applyPress(s, "not-a-button"), false);
+});
+
+test("applyPress: FNAF2 mask, camera, vent light (exclusive per side), music box", () => {
+  const s = new FnafSession({ mode: "fnaf2", rng: seeded(1) });
+  applyPress(s, "mask");
+  assert.equal(s.controls.mask, true);
+  applyPress(s, "vent-left");
+  assert.equal(s.controls.ventLight, "left");
+  applyPress(s, "vent-right");
+  assert.equal(s.controls.ventLight, "right");
+  applyPress(s, "vent-right");
+  assert.equal(s.controls.ventLight, null);
+  applyPress(s, "musicbox");
+  assert.equal(s.controls.wind, true);
+});
+
+test("applyPress: FNAF3 seals and system reboots are edge pulses; lure uses the current room", () => {
+  const s = new FnafSession({ mode: "fnaf3", rng: seeded(1) });
+  applyPress(s, "vent-1");
+  assert.equal(s.controls.seal, "B");
+  applyPress(s, "btn-audio");
+  assert.equal(s.controls.reboot, "audio");
+  applyPress(s, "lure");
+  assert.equal(s.controls.lure, "hall1");
+  s.start();
+  s.update(0.1);
+  assert.equal(s.controls.seal, null);
+  assert.equal(s.controls.lure, null);
+});
+
+test("applyPress: FNAF4 door buttons set facing; props toggle", () => {
+  const s = new FnafSession({ mode: "fnaf4", rng: seeded(1) });
+  applyPress(s, "closet-right");
+  assert.equal(s.controls.facing, "closet");
+  applyPress(s, "flashlight");
+  assert.equal(s.controls.flashlight, true);
+  applyPress(s, "door-hall");
+  assert.equal(s.controls.facing, "hall");
+});

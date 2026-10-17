@@ -155,6 +155,7 @@ export class FnafSession {
     this.phone = null;
     this.phase = "idle";
     this.controls = defaultControls();
+    if (this.mode === "fnaf3") this.controls.cam = "hall1"; // FNAF3 camera rooms
     this.clock = 0;
     this.dead = false;
     this.won = false;
@@ -285,5 +286,50 @@ export class FnafSession {
       engine: s,
       phone: this.phone ? this.phone.snapshot() : null,
     };
+  }
+}
+
+// Maps a click on a world item (office button, space prop) onto session
+// controls. Pure: the scene calls this and the test suite checks the mapping.
+// Returns true when the press changed a control.
+export function applyPress(session, id, info = {}) {
+  const c = session.controls;
+  const toggle = (k) => { c[k] = !c[k]; return true; };
+  switch (session.mode) {
+    case "fnaf1":
+      if (id === "door-left") return toggle("doorL");
+      if (id === "door-right") return toggle("doorR");
+      if (id === "light-left") return toggle("lightL");
+      if (id === "light-right") return toggle("lightR");
+      if (id === "monitor") return toggle("monitor");
+      if (id === "camera" && info.room) { c.room = info.room; return true; }
+      return false;
+    case "fnaf2":
+      if (id === "mask") return toggle("mask");
+      if (id === "monitor") return toggle("camera");
+      if (id === "flashlight") return toggle("flashlight");
+      if (id === "musicbox") return toggle("wind");
+      if (id === "vent-left") { c.ventLight = c.ventLight === "left" ? null : "left"; return true; }
+      if (id === "vent-right") { c.ventLight = c.ventLight === "right" ? null : "right"; return true; }
+      return false;
+    case "fnaf3":
+      if (id === "btn-camera") return toggle("camera");
+      if (id === "btn-audio") { c.reboot = "audio"; return true; }
+      if (id === "btn-vent") { c.reboot = "vent"; return true; }
+      if (id === "vent-0") { c.seal = "A"; return true; }
+      if (id === "vent-1") { c.seal = "B"; return true; }
+      if (id === "vent-2") { c.seal = "C"; return true; }
+      if (id === "lure") { c.lure = c.cam; return true; }
+      return false;
+    case "fnaf4":
+      if (id === "door-left") { c.facing = "left"; return true; }
+      if (id === "door-right") { c.facing = "right"; return true; }
+      if (id === "door-hall") { c.facing = "hall"; return true; }
+      if (id === "closet-left" || id === "closet-right") { c.facing = "closet"; return true; }
+      if (id === "flashlight") return toggle("flashlight");
+      if (id === "nightlight") return toggle("nightlight");
+      return false;
+    default:
+      return false;
   }
 }
