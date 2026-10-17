@@ -21,6 +21,7 @@ import { createFnafWorld } from "./fnaf-scene.mjs";
 import { CAMERAS } from "./fnaf/core/data.mjs";
 import { CAMS2 } from "./fnaf/modes/fnaf2.mjs";
 import { CAMS3 } from "./fnaf/modes/fnaf3.mjs";
+import { adaptiveMultiplier } from "./adaptive-pacing.mjs";
 import { Haunt } from "./haunt.mjs";
 import { PowerSystem } from "./power.mjs";
 import {
@@ -844,6 +845,8 @@ function pointerSelect(controller) {
   raycaster.set(aimOrigin, aimDir);
   raycaster.far = 20;
   // Nearest of: UI panels, the CRT, interactable props.
+  const modeHit = raycaster.intersectObjects(modeTargets)[0];
+  if (modeHit && pickModeFromHit(modeHit)) return;
   const panelHit = raycaster.intersectObjects(targets)[0];
   const crtHit = raycaster.intersectObject(monitor.group, true)[0];
   raycaster.far = 4.5;
@@ -874,6 +877,7 @@ function fnafSelect(controller) {
   aimDir.set(0, 0, -1).applyMatrix4(xrRotation);
   raycaster.set(aimOrigin, aimDir);
   raycaster.far = 6;
+  if (pickModeFromHit(raycaster.intersectObjects(modeTargets)[0])) return;
   const items = fnafWorld.interactables();
   const hit = raycaster.intersectObjects(items.map((i) => i.mesh), true)[0];
   if (hit) {
@@ -1354,6 +1358,7 @@ function fnafStop() {
   if (!fnaf) return;
   fnafWorld.exit();
   fnaf = null;
+  director.reset();
   setRoomVisible(true);
   if (!renderer.xr.isPresenting) {
     rig.position.set(0, 0, 2);
@@ -1376,6 +1381,7 @@ function fnafStop() {
 function fnafBegin() {
   if (!fnaf || fnaf.phase !== "idle") return;
   fnaf.start();
+  director.start();
   $("overlay").classList.add("hidden");
   setState(`Night ${fnafNight}. Watch the doors and the power.`);
   fnafCaption("Night begins.", { seconds: 3 });
@@ -1387,6 +1393,7 @@ function fnafReset() {
   fnafWorld.exit();
   fnafFlow.reset();
   fnaf.reset();
+  director.reset();
   fnafWorld.enter(mode);
   scene.background = FNAF_BG;
   $("overlay").innerHTML = fnafIntroHTML(mode, fnafNight);
@@ -1602,6 +1609,8 @@ function updateFnafDock() {
 
 // Per-frame FNAF update. Runs instead of the room loop while a mode is active.
 function fnafFrame(dt, time) {
+  const snap = director.step(dt, performance.now() / 1000);
+  fnaf.engine.setAiLevelMultiplier(adaptiveMultiplier(snap));
   fnaf.update(dt);
   for (const ev of fnaf.consumeEvents()) fnafEvent(ev);
   applyFnafFlow(fnafFlow.update(dt));
@@ -1614,6 +1623,44 @@ function fnafFrame(dt, time) {
 
 // Populated once every room object exists; FNAF modes hide these.
 for (const o of scene.children) if (o !== rig) roomRoots.push(o);
+
+// VR mode picker: world-space panels that stay visible in every mode (they are
+// not in roomRoots), so a headset user can always switch modes.
+const modeTargets = [];
+const MODE_PICK = [
+  ["room", "ROOM"],
+  ["fnaf1", "FNAF 1"],
+  ["fnaf2", "FNAF 2"],
+  ["fnaf3", "FNAF 3"],
+  ["fnaf4", "FNAF 4"],
+];
+MODE_PICK.forEach(([mode, label], i) => {
+  const p = panel(0.5, 0.13, 500, 130);
+  const c = p.ctx;
+  c.fillStyle = "#243429";
+  c.fillRect(0, 0, 500, 130);
+  c.strokeStyle = "#9aad86";
+  c.lineWidth = 4;
+  c.strokeRect(3, 3, 494, 124);
+  c.fillStyle = "#f1f5e8";
+  c.font = "bold 42px sans-serif";
+  c.textAlign = "center";
+  c.fillText(label, 250, 82);
+  p.texture.needsUpdate = true;
+  p.mesh.position.set(-0.96 + i * 0.48, 0.98, -1.25);
+  p.mesh.rotation.y = -(i - 2) * 0.12;
+  p.mesh.userData.mode = mode;
+  p.mesh.visible = false;
+  scene.add(p.mesh);
+  modeTargets.push(p.mesh);
+});
+const MODE_PICKER = false; // one combined mode; the picker code stays for later
+function pickModeFromHit(hit) {
+  if (!MODE_PICKER) return false;
+  const mode = hit?.object?.userData?.mode;
+  if (mode) chooseMode(mode);
+  return !!mode;
+}
 
 // ---------- mode menu ----------
 function chooseMode(mode) {
@@ -1628,6 +1675,8 @@ $("modeToggle").onclick = () => {
 };
 for (const b of document.querySelectorAll("#modeMenu [data-mode]"))
   b.onclick = () => chooseMode(b.dataset.mode);
+if (!MODE_PICKER) $("modeToggle").classList.add("hidden");
+fnafStart("fnaf1", 1);
 
 // ---------- test panel (hidden; T key or ?test=1) ----------
 // Every button drives the same handler the real game uses: haunt events,
@@ -1867,6 +1916,7 @@ renderer.setAnimationLoop((time) => {
     fpsAccum = 0;
     fpsFrames = 0;
   }
+  modeTargets.forEach((m) => (m.visible = MODE_PICKER && renderer.xr.isPresenting));
   if (fnaf) {
     fnafFrame(dt, time);
     if (renderer.xr.isPresenting) controllerButtons();

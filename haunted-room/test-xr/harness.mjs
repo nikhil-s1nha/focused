@@ -14,6 +14,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { posix as posixPath } from "node:path";
 import { chromium } from "playwright";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -256,8 +257,10 @@ export async function appBootBlockers(origin) {
       continue;
     }
     const src = await res.text();
-    for (const m of src.matchAll(/from\s+["'](\.\/[^"']+\.mjs)["']/g)) {
-      queue.push("/" + m[1].slice(2));
+    // Resolve each import relative to the importing module's own directory.
+    const dir = posixPath.dirname(path);
+    for (const m of src.matchAll(/from\s+["'](\.\.?\/[^"']+\.mjs)["']/g)) {
+      queue.push(posixPath.normalize(dir + "/" + m[1]));
     }
   }
   return blockers;
