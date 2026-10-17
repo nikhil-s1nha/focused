@@ -23,6 +23,21 @@
 //   * never crosses z >= opts.maxZ (default 0.5; the room side of the door)
 //   * never comes within opts.minPlayerDistance (default 1.5 m) of the player
 //   * it NEVER touches the player.
+//
+// FNAF-style additions (the second threat, with the OPPOSITE rule from the
+// Attendant — being looked at directly drives it off):
+//   * api.setObserved(bool): sustained direct observation drains it; after
+//     opts.stareBanish observed seconds it is banished. Looking away lets it
+//     recover.
+//   * api.trigger("rush" | "jumpscare"): if it was ignored too long (the
+//     Haunt coordinator decides), it rushes — a fast approach that is allowed
+//     through the door line, stopping at opts.revealDistance (~0.9 m, never
+//     touching the player) for a brief face-reveal (face swells, eye light
+//     maxed), then it banishes itself. Exposed as api.mode:
+//     null | "approach" | "reveal". The public state stays within
+//     GHOST_STATES ("stalk" while rushing). No camera effects, ever.
+//   * api.setBlackout(bool): the shroud fades near-invisible but two pale
+//     eye points keep burning in the dark.
 
 export const GHOST_STATES = Object.freeze([
   "hidden",
@@ -195,6 +210,11 @@ export function createGhost(THREE, scene, options = {}) {
     fadeIn: 1.8, // seconds to full presence
     fadeOut: 1.4, // seconds to banish
     stalkSpeed: 0.32, // m/s before lurch modulation — very slow drift
+    stareBanish: 2.2, // observed seconds of direct staring that banish it
+    rushSpeed: 3.2, // m/s during a rush — fast, nothing like the stalk
+    rushFadeIn: 0.35, // seconds to full presence while rushing
+    revealDistance: 0.9, // rush stop distance; it never touches the player
+    revealHold: 0.8, // seconds of face-reveal before it self-banishes
     seed: 0x9057,
     ...options,
   };
@@ -318,6 +338,22 @@ export function createGhost(THREE, scene, options = {}) {
   eyeLight.position.y = 1.76;
   group.add(eyeLight);
 
+  // Two pale eye points: the only thing left of it in a blackout.
+  const eyePointMat = new THREE.MeshBasicMaterial({
+    color: 0xcfe8ff,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  });
+  mats.push(eyePointMat);
+  const eyePointGeo = geo(new THREE.SphereGeometry(0.016, 6, 4));
+  for (const side of [-1, 1]) {
+    const pt = new THREE.Mesh(eyePointGeo, eyePointMat);
+    pt.name = side < 0 ? "ghost-eye-point-l" : "ghost-eye-point-r";
+    pt.position.set(side * 0.055, 1.76, 0.13);
+    group.add(pt);
+  }
+
   // Dark vapor churning around the base (~50 points).
   const VAPOR = 50;
   const vaporPos = new Float32Array(VAPOR * 3);
@@ -357,11 +393,19 @@ export function createGhost(THREE, scene, options = {}) {
     // seeded intervals >= 0.7 s apart — never a sustained strobe above ~2 Hz.
     flickerIn: 0.9 + rand() * 1.8,
     flickerHold: 0,
+    observed: false,
+    stare: 0,
+    blackout: false,
+    rush: null, // {phase: "approach" | "reveal", t}
+    faceScale: 1,
     disposed: false,
   };
 
   function applyFade() {
-    for (const p of shroudParts) p.material.opacity = p.base * st.fade;
+    // Blackout: the shroud all but vanishes; the eye points stay lit.
+    const bodyScale = st.blackout ? 0.05 : 1;
+    for (const p of shroudParts) p.material.opacity = p.base * st.fade * bodyScale;
+    eyePointMat.opacity = st.blackout ? 1 : st.fade * 0.9;
     eyeLight.intensity = Math.min(2, st.fade * 1.7);
   }
 
@@ -369,6 +413,10 @@ export function createGhost(THREE, scene, options = {}) {
     if (!GHOST_STATES.includes(next) || next === st.state) return;
     st.state = next;
     st.hotTimer = 0;
+    if (next === "hidden" || next === "banished") {
+      st.rush = null;
+      st.stare = 0;
+    }
     if (next === "hidden") {
       st.fade = 0;
       applyFade();
@@ -423,8 +471,22 @@ export function createGhost(THREE, scene, options = {}) {
     st.time += dt;
     st.bob += dt;
 
+    // Staring drains it (the opposite rule from the Attendant). Recovery is
+    // slow, so glancing away for a beat doesn't reset the player's progress.
+    if (!st.rush && (st.state === "apparition" || st.state === "stalk")) {
+      if (st.observed) {
+        st.stare += dt;
+        if (st.stare >= opts.stareBanish) {
+          enter("banished");
+        }
+      } else {
+        st.stare = Math.max(0, st.stare - dt * 0.5);
+      }
+    }
+
     // Auto transitions only when the caller supplies Director visuals.
-    if (visuals) {
+    // A rush is short (<2s) and uninterruptible once begun.
+    if (visuals && !st.rush) {
       const tension = clamp01(visuals.tension);
       const quality = visuals.quality == null ? 1 : clamp01(visuals.quality);
       const calm =
@@ -459,7 +521,7 @@ export function createGhost(THREE, scene, options = {}) {
         return;
       }
     } else {
-      st.fade = Math.min(1, st.fade + dt / opts.fadeIn);
+      st.fade = Math.min(1, st.fade + dt / (st.rush ? opts.rushFadeIn : opts.fadeIn));
     }
     applyFade();
 
@@ -511,8 +573,37 @@ export function createGhost(THREE, scene, options = {}) {
     }
     p.needsUpdate = true;
 
-    // Stalk: slow drift + corrupted-frame flicker.
+    // Face-reveal swell during a rush; springs back otherwise.
+    const revealTarget = st.rush && st.rush.phase === "reveal" ? 2.2 : 1;
+    st.faceScale += (revealTarget - st.faceScale) * (1 - Math.exp(-dt / 0.07));
+    face.scale.set(st.faceScale, st.faceScale, 1);
+
+    // Rush: fast approach through the door line, stop at revealDistance
+    // (never touching the player), brief face-reveal, then self-banish.
     let flickerHidden = false;
+    if (st.rush) {
+      st.rush.t += dt;
+      if (st.rush.phase === "approach") {
+        const rdx = opts.player.x - group.position.x;
+        const rdz = opts.player.z - group.position.z;
+        const rd = Math.hypot(rdx, rdz);
+        const step = Math.min(opts.rushSpeed * dt, Math.max(0, rd - opts.revealDistance));
+        if (rd > 1e-9) {
+          group.position.x += (rdx / rd) * step;
+          group.position.z += (rdz / rd) * step;
+        }
+        if (rd - step <= opts.revealDistance + 1e-3) {
+          st.rush = { phase: "reveal", t: 0 };
+        }
+      } else if (st.rush.t >= opts.revealHold) {
+        enter("banished"); // also clears st.rush
+      }
+      group.visible = st.fade > 0.001;
+      void time;
+      return;
+    }
+
+    // Stalk: slow drift + corrupted-frame flicker.
     if (st.state === "stalk") {
       moveStalk(dt);
       if (st.flickerHold > 0) {
@@ -538,6 +629,29 @@ export function createGhost(THREE, scene, options = {}) {
     for (const t of faces) t.dispose?.();
   }
 
+  function trigger(kind) {
+    if (st.disposed) return false;
+    if (kind === "rush" || kind === "jumpscare") {
+      if (st.rush) return false;
+      // Manifests from wherever it is (corridor spawn if it was hidden) and
+      // charges. The rush is the Haunt coordinator's jumpscare variant.
+      if (st.state !== "stalk") enter("stalk");
+      st.rush = { phase: "approach", t: 0 };
+      return true;
+    }
+    return false;
+  }
+
+  function setObserved(on) {
+    if (!st.disposed) st.observed = on === true;
+  }
+
+  function setBlackout(on) {
+    if (st.disposed) return;
+    st.blackout = on === true;
+    applyFade();
+  }
+
   return {
     group,
     update,
@@ -547,6 +661,15 @@ export function createGhost(THREE, scene, options = {}) {
     get state() {
       return st.state;
     },
+    get mode() {
+      return st.rush ? st.rush.phase : null;
+    },
+    get observed() {
+      return st.observed;
+    },
+    trigger,
+    setObserved,
+    setBlackout,
     dispose,
   };
 }

@@ -48,10 +48,11 @@ function colorDistance(color, hex) {
   );
 }
 
-test("ATMOSPHERES exposes the three presets with required keys", () => {
+test("ATMOSPHERES exposes the four presets with required keys", () => {
   assert.deepEqual(Object.keys(ATMOSPHERES).sort(), [
     "cold",
     "ember",
+    "lockdown",
     "observatory",
   ]);
   const colorKeys = [
@@ -294,4 +295,99 @@ test("overlay: created lazily, opacity tracks tension, hidden in XR, removed on 
   } finally {
     delete globalThis.document;
   }
+});
+
+// ---------------------------------------------------------------------------
+// Light-failure API: lockdown grading, flicker, blackout, lightsCut.
+// ---------------------------------------------------------------------------
+
+test("lockdown preset exists and PEAK pulls ambient near-black, lamp pool survives", () => {
+  const parts = rig();
+  const atmo = createAtmosphere(THREE, parts, { preset: "lockdown" });
+  assert.equal(atmo.getPreset(), "lockdown");
+  settle(atmo, visuals({ tension: 1, state: "PEAK" }), 25);
+  const p = ATMOSPHERES.lockdown;
+  // Ambient collapses well below even its fear floor baseline at BUILD.
+  assert.ok(parts.ambient.intensity < 0.02, `ambient ${parts.ambient.intensity}`);
+  // The warm lamp pool stays readable (well above zero).
+  assert.ok(parts.lamp.intensity > p.lampFear * 0.3, `lamp ${parts.lamp.intensity}`);
+  assert.ok(parts.windowLight.intensity < p.windowBase, "window dies down");
+});
+
+test("setBlackout(true) kills practically all light; false restores slowly", () => {
+  const parts = rig();
+  const atmo = createAtmosphere(THREE, parts);
+  settle(atmo, visuals({ tension: 0 }));
+  const lampBefore = parts.lamp.intensity;
+  atmo.setBlackout(true);
+  assert.equal(atmo.blackout, true);
+  settle(atmo, visuals({ tension: 0 }), 2);
+  assert.ok(parts.lamp.intensity < lampBefore * 0.05, "lamp down to remnant");
+  assert.ok(parts.ambient.intensity < 0.03, "ambient near-black");
+  assert.ok(parts.windowLight.intensity < 0.05, "window fully dark");
+  assert.ok(parts.lamp.intensity > 0, "tiny remnant survives");
+  // Background is crushed toward black too.
+  const bg = parts.scene.background;
+  assert.ok(bg.r + bg.g + bg.b < 0.03, "background crushed");
+  atmo.setBlackout(false);
+  assert.equal(atmo.blackout, false);
+  // Restore is a crawl, not a pop: shortly after, still mostly dark...
+  atmo.update(0.1, 0, visuals({ tension: 0 }));
+  assert.ok(parts.lamp.intensity < lampBefore * 0.5, "light crawls back");
+  // ...but it does fully return.
+  settle(atmo, visuals({ tension: 0 }), 10);
+  assert.ok(Math.abs(parts.lamp.intensity - lampBefore) < 1);
+});
+
+test("lightsCut(seconds) is an instant cut that restores on its own", () => {
+  const parts = rig();
+  const atmo = createAtmosphere(THREE, parts);
+  settle(atmo, visuals({ tension: 0.2 }));
+  const lampBefore = parts.lamp.intensity;
+  atmo.lightsCut(1.0);
+  assert.ok(atmo.cutRemaining > 0);
+  // One frame later the room is already dark (no glide down).
+  atmo.update(1 / 60, 0, visuals({ tension: 0.2 }));
+  assert.ok(parts.lamp.intensity < lampBefore * 0.1, "instant darkness");
+  // After the cut window plus recovery time, light is back without any call.
+  settle(atmo, visuals({ tension: 0.2 }), 8);
+  assert.equal(atmo.cutRemaining, 0);
+  assert.ok(parts.lamp.intensity > lampBefore * 0.7, "restores by itself");
+});
+
+test("flicker(): stutter drops the lamp during the window, then expires", () => {
+  const parts = rig();
+  const atmo = createAtmosphere(THREE, parts);
+  settle(atmo, visuals({ tension: 0 }));
+  const base = parts.lamp.intensity;
+  atmo.flicker(0.9, 1.0, "stutter");
+  let min = Infinity;
+  for (let t = 0; t < 1.0; t += 1 / 60) {
+    atmo.update(1 / 60, t, visuals({ tension: 0 }));
+    min = Math.min(min, parts.lamp.intensity);
+  }
+  assert.ok(min < base * 0.5, `stutter dipped to ${min} vs base ${base}`);
+  // Expired: back to steady base.
+  settle(atmo, visuals({ tension: 0 }), 4);
+  assert.ok(Math.abs(parts.lamp.intensity - base) < 0.5);
+});
+
+test("flicker(): sag is one smooth brown-out dip (never a hard off)", () => {
+  const parts = rig();
+  const atmo = createAtmosphere(THREE, parts);
+  settle(atmo, visuals({ tension: 0 }));
+  const base = parts.lamp.intensity;
+  atmo.flicker(0.6, 1.2, "sag");
+  let min = Infinity;
+  let maxStep = 0;
+  let prev = base;
+  for (let t = 0; t < 1.2; t += 1 / 60) {
+    atmo.update(1 / 60, t, visuals({ tension: 0 }));
+    min = Math.min(min, parts.lamp.intensity);
+    maxStep = Math.max(maxStep, Math.abs(parts.lamp.intensity - prev));
+    prev = parts.lamp.intensity;
+  }
+  assert.ok(min < base * 0.6, "sagged");
+  assert.ok(min > base * 0.2, "but never cut to black");
+  assert.ok(maxStep < base * 0.2, "smooth: no single-frame jumps");
 });

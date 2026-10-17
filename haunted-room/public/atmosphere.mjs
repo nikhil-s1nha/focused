@@ -85,6 +85,28 @@ export const ATMOSPHERES = Object.freeze({
     windowFear: 1,
     tensionCurve: 1.6,
   }),
+  // Lockdown: oppressive near-black dread. Ambient collapses toward nothing
+  // as tension climbs, the window is a dead pane, and the only readable thing
+  // in the room is the single warm pool under the lamp (which flickers hard).
+  lockdown: Object.freeze({
+    label: "Lockdown",
+    background: "#020303",
+    fog: "#050706",
+    fogBase: 0.03,
+    fogFear: 0.16,
+    ambientSky: "#5c665e",
+    ambientGround: "#030403",
+    ambientBase: 0.22,
+    ambientFear: 0.015,
+    lampColor: "#ffc37a",
+    lampBase: 16,
+    lampFear: 7,
+    flickerDepth: 0.55,
+    windowColor: "#3d4a50",
+    windowBase: 2,
+    windowFear: 0.25,
+    tensionCurve: 1.5,
+  }),
 });
 
 export const DEFAULT_PRESET = "observatory";
@@ -191,6 +213,47 @@ export function createAtmosphere(
 
   const TAU2PI_7 = (Math.PI * 2) / 7; // ~7 s fog "breathing" period at PEAK
 
+  // ---- light failure: flicker / blackout / lights-cut ----------------------
+  // These are transient multipliers applied AFTER the slow smoothing, so they
+  // can be fast (a sputter must read as a sputter) without fighting the glide.
+  let blackout = false; // sticky until setBlackout(false)
+  let cutRemaining = 0; // seconds left of a lightsCut beat
+  let blackLevel = 0; // smoothed 0..1 toward (blackout || cut) ? 1 : 0
+  const flick = { remaining: 0, duration: 0, intensity: 0, pattern: "stutter" };
+  let flickClock = 0; // advances only while a flicker runs
+
+  // Deterministic per-step pseudo-random (no Math.random): integer hash.
+  function hash01(n) {
+    let h = (n | 0) ^ 0x5bf03635;
+    h = Math.imul(h ^ (h >>> 13), 0x9e3779b1);
+    h ^= h >>> 15;
+    return (h >>> 0) / 4294967296;
+  }
+
+  /**
+   * Trigger a light sputter. intensity 0..1 is how deep the lamp drops,
+   * duration in seconds. pattern: "stutter" (fluorescent on/off chatter) or
+   * "sag" (one smooth brown-out dip and recovery).
+   */
+  function flicker(intensity = 0.7, duration = 1.2, pattern = "stutter") {
+    flick.intensity = clamp01(intensity);
+    flick.duration = Number.isFinite(duration) && duration > 0 ? duration : 1;
+    flick.remaining = flick.duration;
+    flick.pattern = pattern === "sag" ? "sag" : "stutter";
+    flickClock = 0;
+  }
+
+  /** Kill practically all light (tiny emissive remnants only) until false. */
+  function setBlackout(on) {
+    blackout = !!on;
+  }
+
+  /** Sudden all-lights-cut beat: instant darkness, restore after `seconds`. */
+  function lightsCut(seconds = 1.5) {
+    cutRemaining = Number.isFinite(seconds) && seconds > 0 ? seconds : 1.5;
+    blackLevel = 1; // the cut itself is instantaneous — no glide down
+  }
+
   function update(dt, time, visuals = {}) {
     const step = Number.isFinite(dt) && dt > 0 ? dt : 0;
     const t0 = Number.isFinite(time) ? time : 0;
@@ -218,12 +281,18 @@ export function createAtmosphere(
       windowTarget = lerp(preset.windowBase, preset.windowFear, shaped);
       // Gentle flicker: two slow incommensurate sines, depth scaled by
       // tension, and the 2s smoothing below damps it further — never strobes.
-      const flicker =
+      const flickerMod =
         1 -
         preset.flickerDepth *
           shaped *
           (0.5 + 0.5 * Math.sin(t0 * 3.7) * Math.sin(t0 * 2.1));
-      lampTarget = lerp(preset.lampBase, preset.lampFear, shaped) * flicker;
+      lampTarget = lerp(preset.lampBase, preset.lampFear, shaped) * flickerMod;
+      // Lockdown grading at PEAK: ambient is pulled near-black and the window
+      // dies, while the lamp keeps one warm readable pool under it.
+      if (visuals.state === "PEAK") {
+        ambientTarget *= 1 - 0.8 * shaped;
+        windowTarget *= 1 - 0.6 * shaped;
+      }
     }
 
     // ---- exponential smoothing (~tau seconds) ------------------------------
@@ -241,30 +310,58 @@ export function createAtmosphere(
     live.lamp.lerp(target.lamp, k);
     live.window.lerp(target.window, k);
 
+    // ---- light failure overlays (fast, post-smoothing) ----------------------
+    if (cutRemaining > 0) cutRemaining = Math.max(0, cutRemaining - step);
+    const blackTarget = blackout || cutRemaining > 0 ? 1 : 0;
+    // Fast ~0.12s easing: darkness slams in, light crawls back.
+    const kb = 1 - Math.exp(-step / (blackTarget > blackLevel ? 0.05 : 0.5));
+    blackLevel += (blackTarget - blackLevel) * kb;
+    let sputter = 1;
+    if (flick.remaining > 0) {
+      flick.remaining = Math.max(0, flick.remaining - step);
+      flickClock += step;
+      const p = clamp01(flickClock / flick.duration);
+      if (flick.pattern === "sag") {
+        // One smooth brown-out dip and recovery.
+        sputter = 1 - flick.intensity * Math.sin(Math.PI * p);
+      } else {
+        // Fluorescent chatter: deterministic on/off at ~24 steps/s, decaying.
+        const slot = Math.floor(flickClock * 24);
+        const off = hash01(slot) < 0.55;
+        sputter = off ? 1 - flick.intensity * (1 - p * 0.6) : 1;
+      }
+    }
+    // Blackout leaves ~2% lamp remnant so emissives/silhouettes still read.
+    const lampMul = sputter * lerp(1, 0.02, blackLevel);
+    const ambientMul = lerp(1, 0.015, blackLevel) * lerp(1, sputter, 0.4);
+    const windowMul = lerp(1, 0, blackLevel);
+    const colorMul = lerp(1, 0.06, blackLevel);
+
     // ---- apply to the scene ------------------------------------------------
     if (scene) {
       if (scene.background && scene.background.isColor) {
-        scene.background.copy(live.background);
+        scene.background.copy(live.background).multiplyScalar(colorMul);
       } else {
         scene.background = live.background;
       }
       if (scene.fog) {
-        if (scene.fog.color) scene.fog.color.copy(live.fog);
+        if (scene.fog.color)
+          scene.fog.color.copy(live.fog).multiplyScalar(colorMul);
         if ("density" in scene.fog) scene.fog.density = scalars.fogDensity;
       }
     }
     if (ambient) {
       if (ambient.color) ambient.color.copy(live.ambientSky);
       if (ambient.groundColor) ambient.groundColor.copy(live.ambientGround);
-      ambient.intensity = scalars.ambient;
+      ambient.intensity = scalars.ambient * ambientMul;
     }
     if (lamp) {
       if (lamp.color) lamp.color.copy(live.lamp);
-      lamp.intensity = scalars.lamp;
+      lamp.intensity = scalars.lamp * lampMul;
     }
     if (windowLight) {
       if (windowLight.color) windowLight.color.copy(live.window);
-      windowLight.intensity = scalars.window;
+      windowLight.intensity = scalars.window * windowMul;
     }
 
     // ---- overlay: desktop only, hidden while presenting in XR --------------
@@ -290,6 +387,18 @@ export function createAtmosphere(
     setPreset,
     getPreset: () => presetName,
     update,
+    flicker,
+    setBlackout,
+    lightsCut,
+    get blackout() {
+      return blackout;
+    },
+    get blackLevel() {
+      return blackLevel;
+    },
+    get cutRemaining() {
+      return cutRemaining;
+    },
     setDomOverlay,
     get overlayElement() {
       return overlayEl;

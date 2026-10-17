@@ -1,20 +1,24 @@
-// monitor.mjs — a chunky CRT security monitor whose screen is a live render-
-// target feed from a camera mounted high in the corridor, looking back at the
-// room. Because the feed camera covers the corridor where the apparition
-// spawns, the entity shows up ON THE MONITOR before it reaches the room —
-// the classic "it's on the camera before it's in the room" beat.
+// monitor.mjs — a chunky CRT security console whose screen is a live render-
+// target feed from virtual cameras covering the room's zones. Because the
+// feeds cover the corridor where the apparition spawns, the entity shows up
+// ON THE MONITOR before it reaches the room — the classic "it's on the camera
+// before it's in the room" beat. The console is the surveillance half of the
+// watch-vs-power resource loop (see public/power.mjs for the other half).
 //
 // Render-target pattern per the standard three.js WebGLRenderTarget approach;
-// prop geometry, scanline/static overlay and scheduling are original.
+// prop geometry, scanline/static overlay, OSD and scheduling are original.
 // Procedural noise texture technique informed by bridge-mind/bridge-horror-house
 // (MIT) grain tiles.
 //
 // Performance policy (Quest 3S):
 //   * The RT (256x192) is re-rendered only every 4th update() call, and only
 //     when visuals.lighting isn't disabled.
+//   * setActive(false) ("putting the monitor down") stops ALL RT rendering;
+//     the screen goes dark and update() does only trivial work.
 //   * options.enabled === false makes update() a cheap early-return.
 //   * setFeed(-1) disables RT rendering entirely — the screen draws animated
 //     static only — so integration can turn the feed off if perf suffers.
+//   * setSignalLost(true) also stops RT rendering: the channel is pure static.
 //   * While renderer.xr.isPresenting is true the RT render is SKIPPED unless
 //     options.xrSafe === true. Re-rendering a render target inside an XR
 //     animation frame is allowed by three.js but costly on mobile GPUs (extra
@@ -24,6 +28,10 @@
 //   * The monitor group hides itself during its own RT pass: the screen
 //     samples rt.texture, and sampling a target while rendering into it is a
 //     WebGL feedback loop.
+//   * The OSD (camera label / REC dot / timestamp) is a small CanvasTexture
+//     redrawn at most ~2x per second (second ticks and REC blinks), plus on
+//     camera/state changes. In Node (no document) the OSD plane is skipped
+//     but all OSD state remains queryable via getOsd().
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const clamp01 = (v) => (Number.isFinite(v) ? clamp(v, 0, 1) : 0);
@@ -59,27 +67,79 @@ function makeNoiseTexture(THREE, rand, size = 64) {
   return t;
 }
 
+function formatTimestamp(seconds) {
+  const s = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
+  const hh = String(Math.floor(s / 3600)).padStart(2, "0");
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
+// Default camera plan: four zones of the observation chamber.
+// Room bounds x ±3.5, z -5.5..3.5; player at z=2, eye 1.6, looking -Z;
+// the apparition spawns in the corridor at z ~ -7 (visible from CAM 02).
+const DEFAULT_CAMERAS = [
+  {
+    id: "far-corner",
+    label: "CAM 01 — FAR CORNER",
+    zone: "far-corner",
+    position: [-3.2, 2.5, -5.1],
+    lookAt: [0.5, 1.1, 1.5],
+  },
+  {
+    id: "doorway",
+    label: "CAM 02 — DOORWAY",
+    zone: "doorway",
+    position: [0, 2.4, -4.9],
+    lookAt: [0, 1.2, -8.5], // down the corridor, covers the ghost spawn
+  },
+  {
+    id: "cabinet",
+    label: "CAM 03 — CABINET",
+    zone: "cabinet",
+    position: [3.2, 2.5, -2.2],
+    lookAt: [-2.6, 1.1, -3.6], // cabinet / window side
+  },
+  {
+    id: "rear",
+    label: "CAM 04 — REAR",
+    zone: "rear",
+    position: [0, 2.55, 3.3],
+    lookAt: [0, 1.2, -2.0], // behind the player, looking over their shoulder
+  },
+];
+
 export function createMonitor(THREE, renderer, scene, options = {}) {
   const opts = {
     position: { x: -2.55, y: 1.4, z: -3.7 }, // on the cabinet
     rotation: null, // [x, y, z] Euler override; default aims at the player
     lookAt: { x: 0, y: 1.5, z: 2 },
     enabled: true,
+    active: true, // monitor "up" (being watched). Integration toggles this.
     xrSafe: false,
-    interval: 4, // RT re-render every Nth update() call
+    interval: 4, // RT re-render every Nth update() call (~10-18 fps)
     rtWidth: 256,
     rtHeight: 192,
     staticSpike: 0.7, // tension above this => heavy static
-    cameras: [
-      // 0: high in the corridor, looking back through the doorway at the room
-      //    (includes the ghost spawn at z ~ -7).
-      { position: [0, 2.35, -8.6], lookAt: [0, 1.2, 1.5] },
-      // 1: room corner cam.
-      { position: [3.1, 2.4, 3.2], lookAt: [0, 1.0, -3.0] },
-    ],
+    cameras: DEFAULT_CAMERAS,
     seed: 0xc47,
     ...options,
   };
+
+  // Normalize cameras: legacy entries ({position, lookAt} only) get generated
+  // ids/labels/zones so older option objects keep working.
+  const cameras = (Array.isArray(opts.cameras) ? opts.cameras : []).map(
+    (c, i) => ({
+      id: typeof c.id === "string" ? c.id : `cam-${i}`,
+      label:
+        typeof c.label === "string"
+          ? c.label
+          : `CAM ${String(i + 1).padStart(2, "0")}`,
+      zone: typeof c.zone === "string" ? c.zone : `cam-${i}`,
+      position: c.position,
+      lookAt: c.lookAt,
+    }),
+  );
 
   // Deterministic LCG — no Math.random.
   let seed = (opts.seed >>> 0) || 1;
@@ -187,6 +247,32 @@ export function createMonitor(THREE, renderer, scene, options = {}) {
   led.position.set(0.19, -0.15, 0.121);
   group.add(led);
 
+  /* ---------------- OSD (label / REC / timestamp) ---------------- */
+  // Browser only: a transparent CanvasTexture plane over the screen glass.
+  // All OSD *state* lives in st.osd so Node tests can verify the logic.
+
+  let osdCanvas = null;
+  let osdCtx = null;
+  let osdTex = null;
+  if (typeof document !== "undefined") {
+    osdCanvas = document.createElement("canvas");
+    osdCanvas.width = 256;
+    osdCanvas.height = 192;
+    osdCtx = osdCanvas.getContext("2d");
+    osdTex = new THREE.CanvasTexture(osdCanvas);
+    const osdMat = mat(
+      new THREE.MeshBasicMaterial({
+        map: osdTex,
+        transparent: true,
+        depthWrite: false,
+      }),
+    );
+    const osdPlane = new THREE.Mesh(screenGeo, osdMat);
+    osdPlane.name = "monitor-osd";
+    osdPlane.position.z = 0.126;
+    group.add(osdPlane);
+  }
+
   if (Array.isArray(opts.rotation)) {
     group.rotation.set(opts.rotation[0], opts.rotation[1], opts.rotation[2]);
   } else {
@@ -198,31 +284,53 @@ export function createMonitor(THREE, renderer, scene, options = {}) {
 
   const st = {
     enabled: opts.enabled !== false,
+    active: opts.active !== false, // monitor pulled up / being watched
+    signalLost: false,
     feed: -2, // force applyFeed(0) below to run
     frame: 0,
     time: 0,
+    burstUntil: -1, // st.time horizon of the current static burst
     disposed: false,
+    osd: {
+      label: "",
+      zone: null,
+      rec: true,
+      timestamp: "00:00:00",
+      signalLost: false,
+      active: true,
+    },
+    osdDirty: true,
   };
 
-  function applyFeed(index) {
-    const i = Number.isInteger(index) ? index : -1;
-    const next = i >= 0 && i < opts.cameras.length ? i : -1;
-    if (next === st.feed) return;
-    st.feed = next;
-    if (next < 0) {
-      // Dead channel: no RT sampling, pure animated static.
+  function refreshScreenMode() {
+    if (!st.active) {
+      screenMat.map = null;
+      screenMat.color.setHex(0x030404); // tube off
+    } else if (st.signalLost || st.feed < 0) {
+      // Dead channel / lost signal: no RT sampling, pure animated static.
       screenMat.map = null;
       screenMat.color.setHex(0x0a0f0c);
       staticMat.opacity = Math.max(staticMat.opacity, 0.55);
     } else {
-      const cam = opts.cameras[next];
-      rtCamera.position.set(cam.position[0], cam.position[1], cam.position[2]);
-      rtCamera.lookAt(cam.lookAt[0], cam.lookAt[1], cam.lookAt[2]);
-      rtCamera.updateMatrixWorld(true);
       screenMat.map = rt.texture;
       screenMat.color.setHex(0xa8c4b2);
     }
     screenMat.needsUpdate = true;
+    st.osdDirty = true;
+  }
+
+  function applyFeed(index) {
+    const i = Number.isInteger(index) ? index : -1;
+    const next = i >= 0 && i < cameras.length ? i : -1;
+    if (next === st.feed) return;
+    st.feed = next;
+    if (next >= 0) {
+      const cam = cameras[next];
+      rtCamera.position.set(cam.position[0], cam.position[1], cam.position[2]);
+      rtCamera.lookAt(cam.lookAt[0], cam.lookAt[1], cam.lookAt[2]);
+      rtCamera.updateMatrixWorld(true);
+    }
+    refreshScreenMode();
   }
   applyFeed(0);
 
@@ -244,6 +352,74 @@ export function createMonitor(THREE, renderer, scene, options = {}) {
     group.visible = prevVisible;
   }
 
+  function drawOsd() {
+    if (!osdCtx) return;
+    const w = osdCanvas.width;
+    const h = osdCanvas.height;
+    osdCtx.clearRect(0, 0, w, h);
+    if (!st.osd.active) {
+      osdTex.needsUpdate = true;
+      return;
+    }
+    osdCtx.font = "bold 16px monospace";
+    osdCtx.textBaseline = "top";
+    if (st.osd.signalLost) {
+      osdCtx.fillStyle = "rgba(230,240,235,0.95)";
+      osdCtx.textAlign = "center";
+      osdCtx.fillText("SIGNAL LOST", w / 2, h / 2 - 8);
+      osdCtx.textAlign = "left";
+      osdTex.needsUpdate = true;
+      return;
+    }
+    // Camera label, top-left.
+    osdCtx.fillStyle = "rgba(220,235,226,0.9)";
+    osdCtx.textAlign = "left";
+    osdCtx.fillText(st.osd.label, 8, 8);
+    // REC dot + text, top-right, blinking.
+    if (st.osd.rec) {
+      osdCtx.fillStyle = "rgba(235,70,60,0.95)";
+      osdCtx.beginPath();
+      osdCtx.arc(w - 52, 16, 5, 0, Math.PI * 2);
+      osdCtx.fill();
+      osdCtx.fillStyle = "rgba(220,235,226,0.9)";
+      osdCtx.fillText("REC", w - 42, 8);
+    }
+    // Timestamp, bottom-left.
+    osdCtx.fillStyle = "rgba(220,235,226,0.85)";
+    osdCtx.fillText(st.osd.timestamp, 8, h - 24);
+    osdTex.needsUpdate = true;
+  }
+
+  function updateOsdState(visuals) {
+    const cam = st.feed >= 0 ? cameras[st.feed] : null;
+    const label = st.feed >= 0 ? cam.label : "NO FEED";
+    const zone = st.feed >= 0 ? cam.zone : null;
+    const rec = Math.sin(st.time * Math.PI) >= 0; // 0.5 Hz blink, no strobe
+    const elapsed = Number.isFinite(visuals?.elapsed) ? visuals.elapsed : st.time;
+    const timestamp = formatTimestamp(elapsed);
+    const o = st.osd;
+    if (
+      label !== o.label ||
+      zone !== o.zone ||
+      rec !== o.rec ||
+      timestamp !== o.timestamp ||
+      st.signalLost !== o.signalLost ||
+      st.active !== o.active
+    ) {
+      o.label = label;
+      o.zone = zone;
+      o.rec = rec;
+      o.timestamp = timestamp;
+      o.signalLost = st.signalLost;
+      o.active = st.active;
+      st.osdDirty = true;
+    }
+    if (st.osdDirty) {
+      drawOsd();
+      st.osdDirty = false;
+    }
+  }
+
   function update(dt, time, visuals) {
     if (st.disposed || !st.enabled) return; // cheap early-return when disabled
     dt = clamp(Number.isFinite(dt) ? dt : 0, 0, 0.1);
@@ -260,12 +436,20 @@ export function createMonitor(THREE, renderer, scene, options = {}) {
     let opacity = 0.1 + tension * 0.3;
     if (tension > opts.staticSpike) opacity = 0.85;
     if (st.feed < 0) opacity = Math.max(opacity, 0.55);
+    if (st.time < st.burstUntil) opacity = Math.max(opacity, 0.92); // VHS burst
+    if (st.signalLost) opacity = 0.97; // full-static channel
+    if (!st.active) opacity = 0.04; // tube is off; faint glass sheen only
     staticMat.opacity = opacity;
     // Animated static: jitter the noise tile every update (cheap; no RT).
     noiseTex.offset.set(rand(), rand());
 
-    // RT feed refresh — every Nth update, feed live, lighting not disabled,
-    // and not mid-XR-presentation unless explicitly opted in (see header).
+    updateOsdState(visuals);
+
+    // RT feed refresh — every Nth update, monitor up, feed live and intact,
+    // lighting not disabled, and not mid-XR-presentation unless explicitly
+    // opted in (see header).
+    if (!st.active) return;
+    if (st.signalLost) return;
     if (st.feed < 0) return;
     if (visuals?.lighting === false) return;
     if (renderer?.xr?.isPresenting && opts.xrSafe !== true) return;
@@ -280,6 +464,7 @@ export function createMonitor(THREE, renderer, scene, options = {}) {
     scene.remove(group);
     rt.dispose();
     noiseTex.dispose();
+    osdTex?.dispose();
     for (const g of geoms) g.dispose?.();
     for (const m of mats) m.dispose?.();
   }
@@ -291,6 +476,69 @@ export function createMonitor(THREE, renderer, scene, options = {}) {
     setFeed: (camIndex) => {
       if (!st.disposed) applyFeed(camIndex);
     },
+    /**
+     * Select a camera by valid index only (surveillance console semantics);
+     * out-of-range / non-integer input is ignored, never killing the feed.
+     */
+    selectCamera: (index) => {
+      if (st.disposed) return;
+      if (Number.isInteger(index) && index >= 0 && index < cameras.length) {
+        applyFeed(index);
+      }
+    },
+    /** Pull the monitor up (true) or put it down (false). Down = no RT cost. */
+    setActive: (active) => {
+      if (st.disposed) return;
+      const next = active === true;
+      if (next === st.active) return;
+      st.active = next;
+      refreshScreenMode();
+    },
+    isActive: () => st.active && !st.disposed,
+    /** Full-static "SIGNAL LOST" mode (entity at this camera / power out). */
+    setSignalLost: (lost) => {
+      if (st.disposed) return;
+      const next = lost === true;
+      if (next === st.signalLost) return;
+      st.signalLost = next;
+      refreshScreenMode();
+    },
+    /** VHS-style interference burst ("it moved while you watched"). */
+    staticBurst: (duration = 0.4) => {
+      if (st.disposed) return;
+      const d = clamp(Number.isFinite(duration) ? duration : 0.4, 0.05, 3);
+      st.burstUntil = st.time + d;
+    },
+    /** Info about the selected camera (index -1 / nulls when feed is dead). */
+    getCamera: () => {
+      const cam = st.feed >= 0 ? cameras[st.feed] : null;
+      return {
+        index: st.feed,
+        count: cameras.length,
+        id: cam ? cam.id : null,
+        label: cam ? cam.label : null,
+        zone: cam ? cam.zone : null,
+      };
+    },
+    /**
+     * Zone id the player is currently observing, or null. Contract for entity
+     * AI: non-null only while the monitor is up, the feed is live, and the
+     * signal is intact — a lost signal means the player can't actually see.
+     */
+    getWatchedZone: () =>
+      !st.disposed && st.active && !st.signalLost && st.feed >= 0
+        ? cameras[st.feed].zone
+        : null,
+    /** OSD state (label/REC/timestamp/signal-lost), Node-testable. */
+    getOsd: () => ({ ...st.osd }),
+    getState: () => ({
+      active: st.active,
+      signalLost: st.signalLost,
+      camera: st.feed,
+      cameraCount: cameras.length,
+      burstRemaining: Math.max(0, st.burstUntil - st.time),
+      disposed: st.disposed,
+    }),
     dispose,
   };
 }

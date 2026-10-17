@@ -12,6 +12,9 @@ const KEYS = [
   "metalAged",
   "fabricWorn",
   "corridorWall",
+  "wallDamaged",
+  "scratchedPlaster",
+  "paperDrawing",
 ];
 
 // Minimal stub canvas: the 2d context only records putImageData payloads,
@@ -49,7 +52,7 @@ test("makeNoise: deterministic, in [0,1), seed-sensitive", () => {
   for (const v of seqA) assert.ok(v >= 0 && v < 1, `out of range: ${v}`);
 });
 
-test("all 8 keys are MeshStandardMaterials with wrapped canvas map + bump", () => {
+test("all 11 keys are MeshStandardMaterials with wrapped canvas map + bump", () => {
   const { createCanvas } = makeStubCanvasFactory();
   const lib = createMaterialLibrary(THREE, { createCanvas });
   assert.deepEqual(Object.keys(lib.materials).sort(), [...KEYS].sort());
@@ -153,4 +156,44 @@ test("dispose() disposes every created texture and material", () => {
   lib.dispose();
   assert.equal(texDisposed, textures.size, "every unique texture disposed");
   assert.equal(matDisposed, mats.length, "every material disposed");
+});
+
+test("decay set: drawing reads as pale paper, damage variants diverge from clean plaster", () => {
+  const { createCanvas, calls } = makeStubCanvasFactory();
+  const lib = createMaterialLibrary(THREE, { createCanvas });
+  const bytesFor = (key) => {
+    const canvas = lib.materials[key].map.image;
+    return calls.find((c) => c.canvas === canvas).image.data;
+  };
+  // paperDrawing: mean brightness far above any wall surface (it is paper).
+  const mean = (d) => {
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+    return sum / (d.length * 0.75);
+  };
+  const paper = mean(bytesFor("paperDrawing"));
+  const wall = mean(bytesFor("wallPlaster"));
+  assert.ok(paper > 140, `paper is bright (${paper})`);
+  assert.ok(paper > wall * 1.6, "paper much brighter than plaster");
+  // paperDrawing contains strong crayon color (red channel dominant pixels).
+  const d = bytesFor("paperDrawing");
+  let colored = 0;
+  for (let i = 0; i < d.length; i += 4)
+    if (d[i] > d[i + 2] + 40 || d[i + 2] > d[i] + 30) colored++;
+  assert.ok(colored > 50, `crayon strokes present (${colored} px)`);
+  // Damage variants actually differ from the clean plaster bytes.
+  const clean = bytesFor("wallPlaster");
+  for (const key of ["wallDamaged", "scratchedPlaster"]) {
+    const dam = bytesFor(key);
+    let diff = 0;
+    for (let i = 0; i < 4096; i++) if (dam[i] !== clean[i]) diff++;
+    assert.ok(diff > 1000, `${key} diverges from clean plaster (${diff})`);
+  }
+  // scratchedPlaster: dark gouge pixels exist (deep bump lows).
+  const bump = lib.materials.scratchedPlaster.bumpMap.image;
+  const bumpBytes = calls.find((c) => c.canvas === bump).image.data;
+  let gouges = 0;
+  for (let i = 0; i < bumpBytes.length; i += 4) if (bumpBytes[i] < 60) gouges++;
+  assert.ok(gouges > 200, `gouges cut into the bump map (${gouges})`);
+  lib.dispose();
 });

@@ -27,7 +27,8 @@ test("contract: update, interactables, dispose, debug hook", () => {
   assert.equal(typeof env.update, "function");
   assert.equal(typeof env.dispose, "function");
   assert.ok(Array.isArray(env.interactables));
-  assert.equal(env.interactables.length, 3);
+  assert.equal(env.interactables.length, 5);
+  assert.equal(typeof env.creakDoor, "function");
   assert.equal(typeof env.debug.corridorVisibleCount, "number");
   assert.equal(typeof env.debug.corridorExtent, "number");
   assert.ok(env.debug.root.isObject3D);
@@ -162,5 +163,74 @@ test("performance budget: mesh count and triangles stay within limits", () => {
   assert.ok(drawables < 120, `drawables ${drawables} should stay under 120`);
   assert.ok(triangles < 150000, `triangles ${triangles} under budget`);
   assert.ok(lights <= 2, "at most two supplementary lights");
+  env.dispose();
+});
+
+test("decay interactables: drawing and wire exist, are tagged and respond", () => {
+  const scene = new THREE.Scene();
+  const env = createEnvironment(THREE, scene);
+  const ids = env.interactables.map((i) => i.id).sort();
+  assert.deepEqual(ids, ["clock", "corridor-door", "drawing", "radio", "wire"]);
+  // Wire: provoking it lights the spark for a stretch of frames.
+  const wire = env.interactables.find((i) => i.id === "wire");
+  settle(env, visuals({ tension: 0 }), 1);
+  wire.onInteract();
+  let lit = 0;
+  for (let t = 0; t < 1.2; t += 1 / 30) {
+    env.update(1 / 30, t, visuals({ tension: 0 }));
+    if (env.debug.spark.material.opacity > 0.3) lit++;
+  }
+  assert.ok(lit > 20, `spark burst lit ${lit} frames`);
+  // Drawing: interacting stirs the paper off its resting tilt.
+  const drawing = env.interactables.find((i) => i.id === "drawing");
+  drawing.onInteract();
+  let maxTilt = 0;
+  for (let t = 0; t < 2; t += 1 / 30) {
+    env.update(1 / 30, t, visuals({ tension: 0 }));
+    maxTilt = Math.max(maxTilt, Math.abs(env.debug.drawing.rotation.z - 0.05));
+  }
+  assert.ok(maxTilt > 0.03, `paper stirred (${maxTilt})`);
+  env.dispose();
+});
+
+test("creakDoor opens the door in small clamped increments via the api", () => {
+  const scene = new THREE.Scene();
+  const env = createEnvironment(THREE, scene);
+  const before = env.debug.doorTarget;
+  const after = env.creakDoor(0.12);
+  assert.ok(Math.abs(after - (before + 0.12)) < 1e-9);
+  // Clamped at the full arc no matter how hard it is pushed.
+  for (let i = 0; i < 50; i++) env.creakDoor(0.3);
+  assert.ok(env.debug.doorTarget <= 1.45 + 1e-9);
+  // Negative delta eases it back toward closed, never below zero.
+  for (let i = 0; i < 50; i++) env.creakDoor(-0.3);
+  assert.equal(env.debug.doorTarget, 0);
+  assert.equal(env.creakDoor(Infinity), 0, "non-finite delta is ignored safely");
+  // The mesh actually follows the target over time.
+  env.creakDoor(1.0);
+  const door = env.interactables.find((i) => i.id === "corridor-door");
+  const restAngle = door.mesh.rotation.y;
+  settle(env, visuals({ tension: 0.1 }), 10);
+  assert.ok(door.mesh.rotation.y > restAngle, "door creaks open");
+  env.dispose();
+});
+
+test("injected decay materials are used for the decals and the paper", () => {
+  const scene = new THREE.Scene();
+  const markedPaper = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
+  const markedScratch = new THREE.MeshStandardMaterial({ color: 0x0000ff });
+  const markedDamage = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+  const env = createEnvironment(THREE, scene, {
+    materials: {
+      paperDrawing: markedPaper,
+      scratchedPlaster: markedScratch,
+      wallDamaged: markedDamage,
+    },
+  });
+  const used = new Set();
+  env.debug.root.traverse((o) => o.material && used.add(o.material));
+  assert.ok(used.has(markedPaper), "paperDrawing used");
+  assert.ok(used.has(markedScratch), "scratchedPlaster used");
+  assert.ok(used.has(markedDamage), "wallDamaged used");
   env.dispose();
 });

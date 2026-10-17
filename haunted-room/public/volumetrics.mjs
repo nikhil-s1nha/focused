@@ -55,6 +55,18 @@ void main() {
 
 const clamp01 = (v) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);
 
+// Deterministic mulberry32 PRNG — no Math.random, reproducible in tests.
+function makeRand(seed) {
+  let a = seed >>> 0;
+  return function next() {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export function createVolumetricCone(
   THREE,
   {
@@ -122,6 +134,128 @@ export function createVolumetricCone(
       if (disposed) return;
       disposed = true;
       mesh.removeFromParent?.();
+      geometry.dispose();
+      material.dispose();
+    },
+  };
+}
+
+/**
+ * createDustMotes — a drifting dust cloud living inside a light cone.
+ *
+ * Same local convention as createVolumetricCone: apex at the local origin,
+ * the body hanging down -Y over `height`, radius growing from near zero at
+ * the apex to `radiusBottom` at the base. Parent `points` under the same
+ * object as the cone mesh and the motes sit inside the beam for free.
+ *
+ * One THREE.Points draw call, positions mutated in place every update —
+ * zero per-frame allocations. `count` is hard-capped at 200 (Quest budget).
+ *
+ *   const motes = createDustMotes(THREE, { count: 140 });
+ *   lamp.add(motes.points);
+ *   motes.update(dt);          // per frame
+ *   motes.agitate(1);          // when an entity moves: the dust stirs
+ *   motes.setIntensity(0.8);   // follows the cone's brightness
+ */
+export function createDustMotes(
+  THREE,
+  {
+    count = 140,
+    radiusBottom = 0.9,
+    height = 2.2,
+    color = 0xe8dcc0,
+    size = 0.014,
+    seed = 20261,
+  } = {},
+) {
+  const n = Math.max(1, Math.min(200, Math.floor(count) || 1));
+  const rand = makeRand(seed >>> 0 || 1);
+  const pos = new Float32Array(n * 3);
+  const drift = new Float32Array(n * 3); // per-mote base drift velocities
+  const phase = new Float32Array(n); // per-mote swirl phase offsets
+
+  // y measured downward from the apex (0..height); radius shrinks toward it.
+  function respawn(i) {
+    const y = rand() * height;
+    const r = (y / height) * radiusBottom * Math.sqrt(rand());
+    const a = rand() * Math.PI * 2;
+    pos[i * 3] = Math.cos(a) * r;
+    pos[i * 3 + 1] = -y;
+    pos[i * 3 + 2] = Math.sin(a) * r;
+    drift[i * 3] = (rand() - 0.5) * 0.015;
+    drift[i * 3 + 1] = -(0.01 + rand() * 0.025); // settling downward
+    drift[i * 3 + 2] = (rand() - 0.5) * 0.015;
+    phase[i] = rand() * Math.PI * 2;
+  }
+  for (let i = 0; i < n; i++) respawn(i);
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const material = new THREE.PointsMaterial({
+    color,
+    size,
+    transparent: true,
+    opacity: 0.35,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+  const points = new THREE.Points(geometry, material);
+  points.name = "dust-motes";
+
+  let turbulence = 0; // 0 calm .. 1 freshly stirred; decays over ~2.5 s
+  let time = 0;
+  let disposed = false;
+  const baseOpacity = 0.35;
+
+  return {
+    points,
+    material,
+    /** How stirred the cloud currently is (decays back to calm). */
+    get turbulence() {
+      return turbulence;
+    },
+    /** An entity moved: kick the dust. strength 0..1 (default full kick). */
+    agitate(strength = 1) {
+      turbulence = Math.max(turbulence, clamp01(strength));
+    },
+    /** Follows the owning cone's brightness: scales mote visibility. */
+    setIntensity(v) {
+      material.opacity = baseOpacity * clamp01(v);
+    },
+    update(dt) {
+      if (disposed) return;
+      const step = Number.isFinite(dt) && dt > 0 ? Math.min(dt, 0.25) : 0;
+      if (step === 0) return;
+      time += step;
+      turbulence = Math.max(0, turbulence - step * 0.4);
+      const stir = 1 + turbulence * 7; // stirred dust rushes
+      for (let i = 0; i < n; i++) {
+        const o = i * 3;
+        // Gentle swirl around the beam axis plus base drift, all scaled by
+        // the current turbulence.
+        const sw = 0.008 * stir;
+        pos[o] += (drift[o] + Math.sin(time * 0.7 + phase[i]) * sw) * step * stir;
+        pos[o + 1] += drift[o + 1] * step * stir;
+        pos[o + 2] += (drift[o + 2] + Math.cos(time * 0.6 + phase[i]) * sw) * step * stir;
+        // Fell out of the beam: respawn near the apex.
+        const y = -pos[o + 1];
+        const rAllowed = Math.max(0.02, (y / height) * radiusBottom * 1.1);
+        if (
+          y > height ||
+          y < 0 ||
+          pos[o] * pos[o] + pos[o + 2] * pos[o + 2] > rAllowed * rAllowed
+        ) {
+          respawn(i);
+          pos[o + 1] = -Math.min(height * 0.25, height) * rand();
+        }
+      }
+      geometry.attributes.position.needsUpdate = true;
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      points.removeFromParent?.();
       geometry.dispose();
       material.dispose();
     },

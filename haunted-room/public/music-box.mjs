@@ -50,6 +50,8 @@ export class MusicBox {
     this.paused = false;
     this.halted = false; // PEAK grind-to-halt
     this.cut = false; // scare hard cut
+    this.wind = 1; // 1 fully wound .. 0 unwound (stopped)
+    this.muffled = false; // distant/through-the-wall lowpass voicing
     this.noteIndex = 0;
     this.nextNoteTime = 0;
     this.live = []; // currently sounding sources: { node, until }
@@ -92,6 +94,26 @@ export class MusicBox {
     if (this.graph)
       this.#setParam(this.graph.master.gain, this.volume * MASTER_CAP, 0.05);
     return this.volume;
+  }
+
+  // FNAF-2-style wind-down. 1 = fully wound (plays sweetly). As wind falls
+  // the tempo drags, the pitch sags flat and notes drop out; at 0 the box
+  // stops entirely (integration ties this to power/blackout). Deterministic
+  // given the injected rng.
+  setWind(v) {
+    this.wind = clamp01(v);
+    this.#applyBus(); // wind 0 fades the bus out like WAIT does
+    return this.wind;
+  }
+
+  // Distant/muffled mode: the box sounds like it plays behind a wall.
+  // Only audible when the context supports a filter node; the flag always
+  // tracks regardless, so integration can toggle it before enabling audio.
+  setMuffled(on) {
+    this.muffled = !!on;
+    if (this.graph && this.graph.tone)
+      this.#setParam(this.graph.tone.frequency, this.muffled ? 620 : 16000, 0.3);
+    return this.muffled;
   }
 
   // Drives behavior from a Director snapshot ({ tension, state, paused,
@@ -141,7 +163,9 @@ export class MusicBox {
       this.nextNoteTime = Math.max(this.nextNoteTime, now + 0.2);
       return;
     }
-    const spb = 60 / (72 - 32 * this.tension); // 72 BPM calm -> 40 BPM terror
+    // 72 BPM calm -> 40 BPM terror; a winding-down spring drags it further
+    // (wind 1 leaves the tempo untouched).
+    const spb = 60 / ((72 - 32 * this.tension) * (0.35 + 0.65 * this.wind));
     while (this.nextNoteTime < now + LOOKAHEAD) {
       // At PEAK the mechanism can seize mid-phrase.
       if (this.state === "PEAK" && this.rng() < 0.08 + this.tension * 0.12) {
@@ -151,7 +175,12 @@ export class MusicBox {
       }
       const note = MELODY[this.noteIndex];
       this.stats.slots += 1;
-      if (this.rng() < this.tension * 0.55) this.stats.dropped += 1;
+      // Tension and a slack spring both make the mechanism skip tines.
+      const dropP = Math.min(
+        0.9,
+        this.tension * 0.55 + (1 - this.wind) * 0.5,
+      );
+      if (this.rng() < dropP) this.stats.dropped += 1;
       else {
         this.#pluck(note, this.nextNoteTime);
         this.stats.scheduled += 1;
@@ -193,6 +222,7 @@ export class MusicBox {
       !this.cut &&
       !this.halted &&
       !this.paused &&
+      this.wind > 0 &&
       this.state !== "WAIT"
     );
   }
@@ -217,7 +247,18 @@ export class MusicBox {
     master.connect(ctx.destination);
     const bus = ctx.createGain();
     bus.gain.value = 1;
-    bus.connect(master);
+    // Optional tone filter: wide open normally, pulled down to ~620 Hz by
+    // setMuffled(true). Contexts without filters keep the direct wiring.
+    let tone = null;
+    if (typeof ctx.createBiquadFilter === "function") {
+      tone = ctx.createBiquadFilter();
+      tone.type = "lowpass";
+      tone.frequency.value = this.muffled ? 620 : 16000;
+      bus.connect(tone);
+      tone.connect(master);
+    } else {
+      bus.connect(master);
+    }
     // A touch of feedback-delay "echo" for the tines, when supported.
     let delay = null;
     if (typeof ctx.createDelay === "function") {
@@ -233,7 +274,7 @@ export class MusicBox {
       delay.connect(wet);
       wet.connect(master);
     }
-    this.graph = { master, bus, delay };
+    this.graph = { master, bus, delay, tone };
   }
 
   #strike(param, peak, t, decay) {
@@ -254,7 +295,9 @@ export class MusicBox {
     const ctx = this.ctx;
     const freq = 440 * Math.pow(2, (note.midi - 69) / 12);
     const waver = Math.sin(t * 2.2) * 15 * this.tension; // slow LFO, in cents
-    const cents = (this.rng() * 2 - 1) * 6 + waver;
+    // A slack spring sags everything slightly FLAT — the creepy degradation.
+    const sag = (1 - this.wind) * 35;
+    const cents = (this.rng() * 2 - 1) * 6 + waver - sag;
     const voices = [
       { mult: 1, peak: 0.5, decay: 1.4 },
       { mult: 4, peak: 0.11, decay: 0.45 },

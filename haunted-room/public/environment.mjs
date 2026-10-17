@@ -41,6 +41,9 @@ const MATERIAL_DEFAULTS = {
   metalAged: { color: 0x565a4b, roughness: 0.7, metalness: 0.3 },
   fabricWorn: { color: 0x3b2d27, roughness: 1 },
   corridorWall: { color: 0x1a1e1b, roughness: 1 },
+  wallDamaged: { color: 0x37392f, roughness: 1 },
+  scratchedPlaster: { color: 0x3a403a, roughness: 1 },
+  paperDrawing: { color: 0xcfc8b4, roughness: 1 },
 };
 
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
@@ -268,6 +271,69 @@ export function createEnvironment(THREE, scene, options = {}) {
   corridor.add(bulbPivot);
   root.add(corridor);
 
+  // --- Decay details: peeling paint, claw drags, cobwebs, fallen book ------
+  const detailPlane = geo(new THREE.PlaneGeometry(1, 1));
+  function wallDecal(material, x, y, z, w, h, ry, rz = 0) {
+    const m = new THREE.Mesh(detailPlane, material);
+    m.position.set(x, y, z);
+    m.rotation.set(0, ry, rz);
+    m.scale.set(w, h, 1);
+    root.add(m);
+    return m;
+  }
+  // Peeling-paint patch on the left wall (just proud of the plaster).
+  wallDecal(mats.wallDamaged, -3.418, 1.9, 1.2, 2.2, 2.1, Math.PI / 2);
+  // Long claw drags on the right wall beside the corridor mouth.
+  wallDecal(mats.scratchedPlaster, 3.418, 1.5, -4.2, 1.5, 2.3, -Math.PI / 2);
+  // Cobwebs: three cheap translucent planes sagging across upper corners.
+  const cobwebMat = basic({
+    color: 0xb9beb2,
+    transparent: true,
+    opacity: 0.09,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const cobwebs = [];
+  for (const [x, y, z, ry] of [
+    [-3.1, 3.25, -5.1, Math.PI / 4],
+    [3.1, 3.3, 3.1, -Math.PI / 4],
+  ]) {
+    const web = new THREE.Mesh(detailPlane, cobwebMat);
+    web.position.set(x, y, z);
+    web.rotation.set(0.5, ry, 0.3);
+    web.scale.set(0.7, 0.55, 1);
+    root.add(web);
+    cobwebs.push(web);
+  }
+  // --- Interactable: child's drawing taped to the front wall ---------------
+  const drawingGroup = new THREE.Group();
+  drawingGroup.position.set(0.55, 1.45, 3.415);
+  drawingGroup.rotation.y = Math.PI; // faces into the room
+  drawingGroup.rotation.z = 0.05; // taped slightly crooked
+  const paper = new THREE.Mesh(detailPlane, mats.paperDrawing);
+  paper.scale.set(0.28, 0.36, 1);
+  drawingGroup.add(paper);
+  root.add(drawingGroup);
+
+  // --- Interactable: dangling wire with a sparking tip ----------------------
+  const wirePivot = new THREE.Group();
+  wirePivot.position.set(0.95, 3.52, -5.05); // hangs by the corridor mouth
+  const wireMat = own(
+    new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 0.6 }),
+  );
+  box(wirePivot, wireMat, 0.02, -0.62, 0, 0.018, 1.24, 0.018, 0.06);
+  const sparkMat = basic({
+    color: 0xffe9b8,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const spark = new THREE.Mesh(geo(new THREE.SphereGeometry(0.03, 8, 6)), sparkMat);
+  spark.position.set(0.06, -1.26, 0);
+  wirePivot.add(spark);
+  root.add(wirePivot);
+
   // --- Shadow entity: soft-edged silhouette, drifts, never teleports -------
   const figure = new THREE.Group();
   const innerMat = basic({ color: 0x020404, transparent: true, opacity: 0 });
@@ -331,7 +397,9 @@ export function createEnvironment(THREE, scene, options = {}) {
     return group;
   }
   let wrongTimer = 0,
-    doorTarget = DOOR_REST;
+    doorTarget = DOOR_REST,
+    flutterTimer = 0,
+    sparkBurst = 0;
   const interactables = [
     {
       id: "clock",
@@ -357,7 +425,30 @@ export function createEnvironment(THREE, scene, options = {}) {
         doorTarget = Math.min(DOOR_MAX, doorTarget + 0.3);
       },
     },
+    {
+      id: "drawing",
+      label: "Child's drawing",
+      mesh: tag(drawingGroup, "drawing"),
+      onInteract() {
+        flutterTimer = 4; // the paper stirs as if breathed on
+      },
+    },
+    {
+      id: "wire",
+      label: "Dangling wire",
+      mesh: tag(wirePivot, "wire"),
+      onInteract() {
+        sparkBurst = 1.6; // provoked: a violent little arc shower
+      },
+    },
   ];
+
+  /** Creak the leaning door open by `delta` radians (clamped to its arc). */
+  function creakDoor(delta = 0.12) {
+    const d = Number.isFinite(delta) ? delta : 0;
+    doorTarget = clamp(doorTarget + d, 0, DOOR_MAX);
+    return doorTarget;
+  }
 
   // --- Per-frame state (no allocations inside update) ----------------------
   let smoothed = 0,
@@ -481,6 +572,31 @@ export function createEnvironment(THREE, scene, options = {}) {
     // Prop micro-motion: frames settle almost imperceptibly.
     frameA.rotation.x = 0.012 * Math.sin(innerTime * 0.23);
     frameB.rotation.z = 0.01 * Math.sin(innerTime * 0.19 + 2.1);
+
+    // Cobwebs breathe with the room's air.
+    for (let i = 0; i < cobwebs.length; i++)
+      cobwebs[i].rotation.z = 0.3 + 0.04 * Math.sin(innerTime * 0.6 + i * 2.1);
+
+    // Child's drawing: pinned crooked; stirs when interacted with, and
+    // trembles faintly on its own at high tension.
+    if (flutterTimer > 0) flutterTimer -= dt;
+    const stir = (flutterTimer > 0 ? 1 : 0) + smoothed * 0.25;
+    drawingGroup.rotation.z =
+      0.05 + stir * 0.1 * Math.sin(innerTime * 9.1) * Math.sin(innerTime * 5.3);
+
+    // Dangling wire sways; its tip arcs sporadically (deterministic pattern),
+    // harder under tension, and showers when provoked via the interactable.
+    wirePivot.rotation.x = Math.sin(innerTime * 0.9) * 0.05;
+    wirePivot.rotation.z = Math.sin(innerTime * 0.67 + 0.8) * (0.07 + stir * 0.05);
+    if (sparkBurst > 0) sparkBurst -= dt;
+    const arcGate =
+      Math.sin(innerTime * 1.3) * Math.sin(innerTime * 2.9 + 1.2) >
+      0.93 - smoothed * 0.25;
+    const arcing = sparkBurst > 0 || arcGate;
+    sparkMat.opacity = arcing
+      ? 0.45 + 0.55 * Math.abs(Math.sin(innerTime * 41))
+      : 0;
+    spark.scale.setScalar(arcing ? 0.8 + 0.6 * Math.abs(Math.sin(innerTime * 29)) : 0.6);
   }
 
   function dispose() {
@@ -494,6 +610,11 @@ export function createEnvironment(THREE, scene, options = {}) {
   const debug = {
     root,
     figure,
+    spark,
+    drawing: drawingGroup,
+    get doorTarget() {
+      return doorTarget;
+    },
     get corridorExtent() {
       return extent;
     },
@@ -504,5 +625,5 @@ export function createEnvironment(THREE, scene, options = {}) {
     },
   };
 
-  return { update, interactables, dispose, debug };
+  return { update, interactables, creakDoor, dispose, debug };
 }

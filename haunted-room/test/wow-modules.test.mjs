@@ -396,6 +396,166 @@ test("monitor: static opacity rises with tension and spikes past 0.7", () => {
   m.dispose();
 });
 
+test("monitor: surveillance console — four default zone cameras", () => {
+  const scene = new THREE.Scene();
+  const stub = makeStubRenderer();
+  const m = createMonitor(THREE, stub, scene);
+  const cam = m.getCamera();
+  assert.equal(cam.count, 4);
+  assert.equal(cam.index, 0);
+  assert.equal(cam.zone, "far-corner");
+  assert.match(cam.label, /^CAM 01/);
+  m.selectCamera(1);
+  assert.equal(m.getCamera().zone, "doorway");
+  assert.match(m.getCamera().label, /DOORWAY/);
+  m.selectCamera(2);
+  assert.equal(m.getCamera().zone, "cabinet");
+  m.selectCamera(3);
+  assert.equal(m.getCamera().zone, "rear");
+  // Invalid selections are ignored (never kill the feed, unlike setFeed).
+  m.selectCamera(99);
+  m.selectCamera(-1);
+  m.selectCamera(1.5);
+  m.selectCamera("doorway");
+  assert.equal(m.getCamera().index, 3);
+  // Legacy camera option shape still works, with generated metadata.
+  const m2 = createMonitor(THREE, stub, scene, {
+    cameras: [{ position: [0, 2, -8], lookAt: [0, 1, 0] }],
+  });
+  assert.equal(m2.getCamera().count, 1);
+  assert.equal(m2.getCamera().zone, "cam-0");
+  assert.equal(m2.getCamera().label, "CAM 01");
+  m.dispose();
+  m2.dispose();
+});
+
+test("monitor: setActive(false) puts the console down — no RT cost, dark tube", () => {
+  const scene = new THREE.Scene();
+  const stub = makeStubRenderer();
+  const m = createMonitor(THREE, stub, scene);
+  const screen = m.group.getObjectByName("monitor-screen");
+  const overlay = m.group.getObjectByName("monitor-static");
+  assert.equal(m.isActive(), true);
+  m.setActive(false);
+  assert.equal(m.isActive(), false);
+  for (let i = 0; i < 12; i++) m.update(0.016, 0, mvis({ tension: 0.9 }));
+  assert.equal(stub.renderCount, 0); // monitor down => no feed renders
+  assert.equal(screen.material.map, null); // tube off
+  assert.ok(overlay.material.opacity < 0.1, "static dies with the tube");
+  m.setActive(true);
+  assert.equal(m.isActive(), true);
+  for (let i = 0; i < 12; i++) m.update(0.016, 0, mvis());
+  assert.equal(stub.renderCount, 3); // cadence resumes
+  assert.ok(screen.material.map); // feed restored
+  m.dispose();
+  assert.equal(m.isActive(), false); // disposed is never "active"
+});
+
+test("monitor: getWatchedZone contract for entity AI", () => {
+  const scene = new THREE.Scene();
+  const stub = makeStubRenderer();
+  const m = createMonitor(THREE, stub, scene);
+  assert.equal(m.getWatchedZone(), "far-corner"); // active by default, CAM 01
+  m.selectCamera(1);
+  assert.equal(m.getWatchedZone(), "doorway");
+  m.setActive(false); // monitor down => not observing anything
+  assert.equal(m.getWatchedZone(), null);
+  m.setActive(true);
+  assert.equal(m.getWatchedZone(), "doorway");
+  m.setSignalLost(true); // full static => player can't actually see the zone
+  assert.equal(m.getWatchedZone(), null);
+  m.setSignalLost(false);
+  assert.equal(m.getWatchedZone(), "doorway");
+  m.setFeed(-1); // dead channel
+  assert.equal(m.getWatchedZone(), null);
+  m.setFeed(2);
+  assert.equal(m.getWatchedZone(), "cabinet");
+  m.dispose();
+  assert.equal(m.getWatchedZone(), null);
+});
+
+test("monitor: staticBurst spikes the overlay then decays back", () => {
+  const scene = new THREE.Scene();
+  const stub = makeStubRenderer();
+  const m = createMonitor(THREE, stub, scene);
+  const overlay = m.group.getObjectByName("monitor-static");
+  m.update(0.016, 0, mvis({ tension: 0.2 }));
+  const calm = overlay.material.opacity;
+  assert.ok(calm < 0.2);
+  m.staticBurst(0.5);
+  assert.ok(m.getState().burstRemaining > 0.4);
+  m.update(0.016, 0, mvis({ tension: 0.2 }));
+  assert.ok(
+    overlay.material.opacity >= 0.9,
+    `burst should read as heavy interference, got ${overlay.material.opacity}`,
+  );
+  // Burst does NOT suppress the live feed (it's interference, not loss).
+  assert.equal(m.getWatchedZone(), "far-corner");
+  // After the burst window the overlay settles back to the tension baseline.
+  for (let i = 0; i < 40; i++) m.update(0.025, 0, mvis({ tension: 0.2 }));
+  assert.equal(m.getState().burstRemaining, 0);
+  assert.ok(overlay.material.opacity < 0.2, "burst must decay");
+  // Non-finite / absurd durations are clamped, never NaN state.
+  m.staticBurst(NaN);
+  assert.ok(m.getState().burstRemaining > 0);
+  m.staticBurst(999);
+  assert.ok(m.getState().burstRemaining <= 3);
+  m.dispose();
+});
+
+test("monitor: setSignalLost => full static, no RT renders, then restores", () => {
+  const scene = new THREE.Scene();
+  const stub = makeStubRenderer();
+  const m = createMonitor(THREE, stub, scene);
+  const screen = m.group.getObjectByName("monitor-screen");
+  const overlay = m.group.getObjectByName("monitor-static");
+  m.setSignalLost(true);
+  for (let i = 0; i < 12; i++) m.update(0.016, 0, mvis({ tension: 0.1 }));
+  assert.equal(stub.renderCount, 0); // lost channel never re-renders the RT
+  assert.equal(screen.material.map, null);
+  assert.ok(overlay.material.opacity >= 0.95, "lost signal is full static");
+  assert.equal(m.getOsd().signalLost, true);
+  assert.equal(m.getState().signalLost, true);
+  m.setSignalLost(false);
+  for (let i = 0; i < 8; i++) m.update(0.016, 0, mvis({ tension: 0.1 }));
+  assert.equal(stub.renderCount, 2);
+  assert.ok(screen.material.map);
+  assert.equal(m.getOsd().signalLost, false);
+  m.dispose();
+});
+
+test("monitor: OSD state — label, REC blink, session timestamp", () => {
+  const scene = new THREE.Scene();
+  const stub = makeStubRenderer();
+  const m = createMonitor(THREE, stub, scene);
+  m.selectCamera(1);
+  m.update(0.016, 0, mvis({ elapsed: 65 }));
+  let osd = m.getOsd();
+  assert.equal(osd.label, "CAM 02 — DOORWAY");
+  assert.equal(osd.zone, "doorway");
+  assert.equal(osd.timestamp, "00:01:05");
+  assert.equal(osd.signalLost, false);
+  // Timestamp follows the director's elapsed clock; falls back to internal.
+  m.update(0.016, 0, mvis({ elapsed: 3723 }));
+  assert.equal(m.getOsd().timestamp, "01:02:03");
+  m.update(0.016, 0, mvis({ elapsed: NaN }));
+  assert.match(m.getOsd().timestamp, /^00:00:0\d$/); // internal clock fallback
+  // REC blinks at ~0.5 Hz: both phases occur within 2.5 simulated seconds.
+  const phases = new Set();
+  for (let i = 0; i < 50; i++) {
+    m.update(0.05, 0, mvis());
+    phases.add(m.getOsd().rec);
+  }
+  assert.deepEqual([...phases].sort(), [false, true]);
+  // Dead channel reads as NO FEED, no zone.
+  m.setFeed(-1);
+  m.update(0.016, 0, mvis());
+  osd = m.getOsd();
+  assert.equal(osd.label, "NO FEED");
+  assert.equal(osd.zone, null);
+  m.dispose();
+});
+
 test("monitor: dispose restores the scene and further calls are safe", () => {
   const scene = new THREE.Scene();
   const stub = makeStubRenderer();

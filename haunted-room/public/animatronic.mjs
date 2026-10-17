@@ -12,6 +12,21 @@
 //                then returns to stage 2. Entity motion only, no camera effects.
 // WAIT / low quality / non-running phase decays the stage toward 0 (~2.5s per
 // stage, so 4 -> 0 over ~10s). Auto logic only runs when `visuals` is passed.
+//
+// FNAF-style additions (all optional; legacy behavior is unchanged):
+//   * options.waypoints: ordered [{x,z}, ...] path. When present, each
+//     "advance" snaps to the NEXT waypoint instead of a fractional step,
+//     still clamped to bounds and >= safeRadius from the player.
+//   * api.setObserved(bool): while observed it cannot move — queued advances
+//     hold, a snap about to land is aborted, the head tracks the player
+//     faster and the eyes brighten. It only ever moves unobserved.
+//   * trigger("jumpscare"): a fast ~0.6s lunge INTO the player's face —
+//     the body accelerates to ~0.42m in front of the player at eye height,
+//     jaw gaping, eyes at maximum flare. Entity motion only; the camera is
+//     never touched. It stays latched at the face until setStage() leaves
+//     stage 4, which also returns it to its pre-jump spot.
+//   * api.setBlackout(bool): body fades near-invisible but both eyes stay
+//     bright emissive points in the dark.
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const clamp01 = (v) => (Number.isFinite(v) ? clamp(v, 0, 1) : 0);
@@ -31,15 +46,16 @@ export const STAGES = Object.freeze([
 // forward), headPitch = chin-down tilt, shoulder/elbow = arm hang, track =
 // whether the head seeks the player, eye = emissive intensity target.
 const POSES = Object.freeze([
-  Object.freeze({ lean: 0.14, headPitch: 0.55, shoulder: 0.26, elbow: 0.38, track: 0, eye: 0 }),
-  Object.freeze({ lean: 0.1, headPitch: 0.22, shoulder: 0.2, elbow: 0.3, track: 1, eye: 0.35 }),
-  Object.freeze({ lean: 0.02, headPitch: 0.04, shoulder: 0.08, elbow: 0.12, track: 1, eye: 1.3 }),
-  Object.freeze({ lean: 0, headPitch: 0, shoulder: 0.04, elbow: 0.05, track: 1, eye: 1.8 }),
-  Object.freeze({ lean: -0.45, headPitch: -0.12, shoulder: -0.5, elbow: 0.05, track: 1, eye: 4 }),
+  Object.freeze({ lean: 0.14, headPitch: 0.55, shoulder: 0.26, elbow: 0.38, track: 0, eye: 0, jaw: 0.34 }),
+  Object.freeze({ lean: 0.1, headPitch: 0.22, shoulder: 0.2, elbow: 0.3, track: 1, eye: 0.35, jaw: 0.3 }),
+  Object.freeze({ lean: 0.02, headPitch: 0.04, shoulder: 0.08, elbow: 0.12, track: 1, eye: 1.3, jaw: 0.22 }),
+  Object.freeze({ lean: 0, headPitch: 0, shoulder: 0.04, elbow: 0.05, track: 1, eye: 1.8, jaw: 0.18 }),
+  Object.freeze({ lean: -0.45, headPitch: -0.12, shoulder: -0.5, elbow: 0.05, track: 1, eye: 4, jaw: 0.8 }),
 ]);
 
 const FADE = 0.5; // seconds of opacity dip around an advance snap
 const LUNGE = 0.7; // seconds a lunge holds before returning to stage 2
+const JUMP = 0.6; // seconds a jumpscare takes to reach the player's face
 
 export function createAnimatronic(THREE, scene, options = {}) {
   const opts = {
@@ -57,6 +73,7 @@ export function createAnimatronic(THREE, scene, options = {}) {
     activeDwell: 0.5,
     decayPerStage: 2.5, // WAIT/low-quality seconds per stage of decay
     advanceStep: 0.35, // fraction of remaining distance per advance
+    waypoints: null, // optional ordered [{x,z}] path for advances
     ...options,
   };
 
@@ -80,7 +97,15 @@ export function createAnimatronic(THREE, scene, options = {}) {
     roughness: 0.3,
     transparent: true,
   });
-  const materials = [bodyMat, accentMat, eyeMat];
+  // The right eye is damaged: dimmer and unsteady — one dim + one bright.
+  const eyeDimMat = new THREE.MeshStandardMaterial({
+    color: 0x120a06,
+    emissive: 0xd98f3a,
+    emissiveIntensity: 0,
+    roughness: 0.5,
+    transparent: true,
+  });
+  const materials = [bodyMat, accentMat, eyeMat, eyeDimMat];
 
   // --- geometry (low segment counts; Quest-friendly) ---
   const group = new THREE.Group();
@@ -145,6 +170,26 @@ export function createAnimatronic(THREE, scene, options = {}) {
     }
   }
   body.add(rivets);
+
+  // Asymmetric damage: a torn chest panel on the right exposing three
+  // armature ribs, and a loose cable hanging off that shoulder.
+  const ribGeo = geo(new THREE.CylinderGeometry(0.012, 0.012, 0.3, 6));
+  for (let r = 0; r < 3; r++) {
+    const rib = mesh(ribGeo, accentMat, `attendant-rib-${r}`);
+    rib.rotation.z = Math.PI / 2;
+    rib.rotation.y = 0.25;
+    rib.position.set(0.13, 0.46 + r * 0.12, 0.23);
+    body.add(rib);
+  }
+  const wire = mesh(
+    geo(new THREE.CylinderGeometry(0.008, 0.008, 0.42, 5)),
+    bodyMat,
+    "attendant-wire",
+  );
+  wire.position.set(0.33, 0.78, 0.09);
+  wire.rotation.z = 0.42;
+  wire.rotation.x = 0.18;
+  body.add(wire);
 
   // Wind-up crank in the back.
   const crank = new THREE.Group();
@@ -217,7 +262,7 @@ export function createAnimatronic(THREE, scene, options = {}) {
   const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
   eyeL.name = "attendant-eye-l";
   eyeL.position.set(-0.075, 0.03, 0.17);
-  const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
+  const eyeR = new THREE.Mesh(eyeGeo, eyeDimMat);
   eyeR.name = "attendant-eye-r";
   eyeR.position.set(0.075, 0.03, 0.17);
   head.add(eyeL, eyeR);
@@ -229,6 +274,27 @@ export function createAnimatronic(THREE, scene, options = {}) {
   grille.rotation.x = Math.PI / 2;
   grille.position.set(0, -0.08, 0.185);
   head.add(grille);
+  // Caved-in plate over the dim eye — the damage reads at a glance.
+  const dent = mesh(
+    geo(new THREE.SphereGeometry(0.09, 8, 6)),
+    accentMat,
+    "attendant-dent",
+  );
+  dent.position.set(0.12, 0.1, 0.11);
+  dent.scale.set(1, 0.65, 0.5);
+  head.add(dent);
+  // Slack jaw: hangs open at rest, gapes during a jumpscare.
+  const jaw = new THREE.Group();
+  jaw.name = "attendant-jaw";
+  jaw.position.set(0, -0.1, 0.05);
+  const jawPlate = mesh(
+    geo(new THREE.BoxGeometry(0.13, 0.035, 0.13)),
+    accentMat,
+    "attendant-jaw-plate",
+  );
+  jawPlate.position.set(0, -0.02, 0.08);
+  jaw.add(jawPlate);
+  head.add(jaw);
   body.add(head);
 
   const faceYaw = () =>
@@ -257,7 +323,15 @@ export function createAnimatronic(THREE, scene, options = {}) {
     headYaw: 0,
     shoulder: POSES[0].shoulder,
     elbow: POSES[0].elbow,
+    jaw: POSES[0].jaw,
     eye: 0,
+    observed: false,
+    blackout: false,
+    wpIndex: -1,
+    jumping: false,
+    jumpT: 0,
+    jumpFrom: null,
+    jumpTo: null,
     disposed: false,
   };
 
@@ -268,15 +342,33 @@ export function createAnimatronic(THREE, scene, options = {}) {
     return seed / 4294967296;
   };
 
-  function setOpacity(k) {
-    if (k === st.opacity) return;
+  function setOpacity(k, force) {
+    if (!force && k === st.opacity) return;
     st.opacity = k;
-    for (const m of materials) m.opacity = k;
+    // Blackout: body near-invisible, eyes stay bright points in the dark.
+    const bodyK = st.blackout ? Math.min(k, 0.05) : k;
+    bodyMat.opacity = bodyK;
+    accentMat.opacity = bodyK;
+    const eyeK = st.blackout ? 1 : k;
+    eyeMat.opacity = eyeK;
+    eyeDimMat.opacity = eyeK;
+  }
+
+  function endJump() {
+    if (!st.jumping) return;
+    st.jumping = false;
+    if (st.jumpFrom) {
+      group.position.x = st.jumpFrom.x;
+      group.position.z = st.jumpFrom.z;
+    }
+    group.position.y = 0;
+    group.rotation.y = faceYaw() + 0.12;
   }
 
   function commit(n) {
     n = clamp(Math.round(n), 0, 4);
     if (!Number.isFinite(n) || n === st.stage) return;
+    if (st.jumping && n !== 4) endJump();
     st.stage = n;
     st.awareTimer = 0;
     st.activeTimer = 0;
@@ -285,12 +377,39 @@ export function createAnimatronic(THREE, scene, options = {}) {
   }
 
   function snap() {
+    const b = opts.bounds;
+    const wps = opts.waypoints;
+    if (Array.isArray(wps) && wps.length) {
+      // Waypoint mode: advance one node along the authored path.
+      if (st.wpIndex >= wps.length - 1) return;
+      st.wpIndex += 1;
+      const wp = wps[st.wpIndex];
+      let x = clamp(wp.x, b.minX, b.maxX);
+      let z = clamp(wp.z, b.minZ, b.maxZ);
+      let dx = x - opts.playerX;
+      let dz = z - opts.playerZ;
+      let d = Math.hypot(dx, dz);
+      if (d < 1e-6) {
+        dx = group.position.x - opts.playerX;
+        dz = group.position.z - opts.playerZ;
+        d = Math.hypot(dx, dz) || 1;
+      }
+      if (d < opts.safeRadius) {
+        const s = opts.safeRadius / d;
+        x = opts.playerX + dx * s;
+        z = clamp(opts.playerZ + dz * s, b.minZ, b.maxZ);
+        x = clamp(x, b.minX, b.maxX);
+      }
+      group.position.x = x;
+      group.position.z = z;
+      group.rotation.y = faceYaw() + 0.12;
+      return;
+    }
     const dx = opts.playerX - group.position.x;
     const dz = opts.playerZ - group.position.z;
     const dist = Math.hypot(dx, dz);
     if (dist <= opts.safeRadius + 1e-6) return;
     const step = Math.min(opts.advanceStep * dist, dist - opts.safeRadius);
-    const b = opts.bounds;
     group.position.x = clamp(group.position.x + (dx / dist) * step, b.minX, b.maxX);
     group.position.z = clamp(group.position.z + (dz / dist) * step, b.minZ, b.maxZ);
     group.rotation.y = faceYaw() + 0.12; // nearly facing the player now
@@ -299,17 +418,38 @@ export function createAnimatronic(THREE, scene, options = {}) {
   function trigger(kind) {
     if (st.disposed) return false;
     if (kind === "advance") {
+      if (st.jumping) return false;
       commit(3);
       st.pending += 1;
-      if (st.fadeT < 0) {
-        st.fadeT = 0;
-        st.snapDone = false;
-      }
       return true;
     }
     if (kind === "scare") {
       if (st.stage === 4) return false;
       commit(4);
+      return true;
+    }
+    if (kind === "jumpscare") {
+      if (st.jumping) return false;
+      // Lunge INTO the player's face: ~0.42m out, along the approach line.
+      st.jumpFrom = { x: group.position.x, z: group.position.z };
+      let dx = group.position.x - opts.playerX;
+      let dz = group.position.z - opts.playerZ;
+      let d = Math.hypot(dx, dz);
+      if (d < 1e-6) {
+        dx = 0;
+        dz = 1;
+        d = 1;
+      }
+      st.jumpTo = {
+        x: opts.playerX + (dx / d) * 0.42,
+        z: opts.playerZ + (dz / d) * 0.42,
+      };
+      st.jumpT = 0;
+      st.fadeT = -1;
+      st.snapDone = false;
+      st.pending = 0;
+      commit(4);
+      st.jumping = true; // after commit so endJump isn't invoked
       return true;
     }
     return false;
@@ -323,8 +463,9 @@ export function createAnimatronic(THREE, scene, options = {}) {
     const v = visuals || null;
     st.tension = clamp01(v?.tension ?? st.tension);
 
-    // Lunge timing: short, then back to active.
-    if (st.stage === 4) {
+    // Lunge timing: short, then back to active. A jumpscare instead latches
+    // at the player's face until setStage() pulls it out of stage 4.
+    if (st.stage === 4 && !st.jumping) {
       st.lungeT += dt;
       if (st.lungeT >= LUNGE) commit(2);
     }
@@ -359,16 +500,27 @@ export function createAnimatronic(THREE, scene, options = {}) {
       }
     }
 
+    // Queued advances start their fade only while UNOBSERVED — it never
+    // moves while watched (the core FNAF rule).
+    if (st.fadeT < 0 && st.pending > 0 && !st.observed && !st.jumping) {
+      st.fadeT = 0;
+      st.snapDone = false;
+    }
+
     // Advance opacity dip + between-the-frames position snap.
     if (st.fadeT >= 0) {
       st.fadeT += dt;
       if (!st.snapDone && st.fadeT >= FADE / 2) {
-        snap();
         st.snapDone = true;
-        st.pending = Math.max(0, st.pending - 1);
+        if (!st.observed) {
+          // The player looked away long enough: it moves between the frames.
+          snap();
+          st.pending = Math.max(0, st.pending - 1);
+        }
+        // Observed at the snap moment: abort the move, keep it queued.
       }
       if (st.fadeT >= FADE) {
-        if (st.pending > 0) {
+        if (st.pending > 0 && !st.observed) {
           st.fadeT = 0;
           st.snapDone = false;
         } else {
@@ -384,6 +536,17 @@ export function createAnimatronic(THREE, scene, options = {}) {
       setOpacity(1);
     }
 
+    // Jumpscare travel: an accelerating ~0.6s lunge to the player's face.
+    if (st.jumping) {
+      st.jumpT += dt;
+      const k = clamp01(st.jumpT / JUMP);
+      const s = k * k; // ease-in — it explodes toward the face
+      group.position.x = st.jumpFrom.x + (st.jumpTo.x - st.jumpFrom.x) * s;
+      group.position.z = st.jumpFrom.z + (st.jumpTo.z - st.jumpFrom.z) * s;
+      group.position.y = 0.18 * s; // raises the skull to the player's eye line
+      group.rotation.y = faceYaw();
+    }
+
     // Pose easing toward the current stage keyframe.
     const pose = POSES[st.stage];
     const tau = st.stage === 4 ? 0.07 : 0.9;
@@ -391,7 +554,13 @@ export function createAnimatronic(THREE, scene, options = {}) {
     st.headPitch = ease(st.headPitch, pose.headPitch, dt, tau);
     st.shoulder = ease(st.shoulder, pose.shoulder, dt, tau);
     st.elbow = ease(st.elbow, pose.elbow, dt, tau);
-    st.eye = ease(st.eye, pose.eye, dt, st.stage === 4 ? 0.05 : 0.8);
+    // Observed while roused: the eyes brighten — it knows you're looking.
+    const eyeTarget = st.jumping
+      ? 6
+      : pose.eye + (st.observed && st.stage >= 1 ? 0.4 : 0);
+    st.eye = ease(st.eye, eyeTarget, dt, st.stage === 4 ? 0.05 : 0.8);
+    const jawTarget = st.jumping ? 1.15 : pose.jaw;
+    st.jaw = ease(st.jaw, jawTarget, dt, st.stage === 4 ? 0.06 : 0.9);
 
     // Head seeks the player's eye line — imperceptibly slow at stage 1
     // (time constant ~2.6s => ~8s to settle), a little quicker when active.
@@ -400,13 +569,15 @@ export function createAnimatronic(THREE, scene, options = {}) {
     const targetYaw = pose.track
       ? wrap(Math.atan2(dx, dz) - group.rotation.y)
       : 0;
-    const yawTau = st.stage <= 1 ? 2.6 : st.stage === 4 ? 0.07 : 1.2;
+    let yawTau = st.stage <= 1 ? 2.6 : st.stage === 4 ? 0.07 : 1.2;
+    if (st.observed && st.stage >= 1) yawTau = Math.min(yawTau, 0.7);
     st.headYaw = ease(st.headYaw, targetYaw, dt, yawTau);
     const lookUp = pose.track
       ? Math.atan2(opts.eyeHeight - 1.45, Math.hypot(dx, dz))
       : 0;
 
-    // Twitch loops with long pauses, only while active/hunting.
+    // Twitch loops with long pauses, only while active/hunting — plus a
+    // subtle constant micro-twitch once roused (stage >= 2).
     let jitter = 0;
     if (st.stage >= 2 && st.stage < 4) {
       if (st.time >= st.nextTwitch) {
@@ -414,6 +585,7 @@ export function createAnimatronic(THREE, scene, options = {}) {
         st.nextTwitch = st.time + 2.5 + rnd() * 4.5;
       }
       if (st.time < st.twitchEnd) jitter = 0.02 * Math.sin(st.time * 61);
+      jitter += 0.004 * Math.sin(st.time * 23.7);
     }
 
     body.rotation.x = st.lean;
@@ -425,7 +597,12 @@ export function createAnimatronic(THREE, scene, options = {}) {
     arms[1].shoulder.rotation.x = st.shoulder - jitter * 2;
     arms[0].elbow.rotation.x = st.elbow;
     arms[1].elbow.rotation.x = st.elbow;
-    eyeMat.emissiveIntensity = st.eye;
+    jaw.rotation.x = st.jaw + jitter * 1.5;
+    // Bright left eye; damaged right eye runs dim and unsteady. In blackout
+    // both hold a glow floor — two points burning in the dark.
+    const dim = st.eye * (0.28 + 0.07 * Math.sin(st.time * 9.3));
+    eyeMat.emissiveIntensity = st.blackout ? Math.max(st.eye, 2.2) : st.eye;
+    eyeDimMat.emissiveIntensity = st.blackout ? Math.max(dim, 1.3) : dim;
     if (st.stage >= 2) crank.rotation.z += dt * (0.5 + st.tension);
     void time; // internal clock drives animation; param kept for API parity
   }
@@ -439,6 +616,16 @@ export function createAnimatronic(THREE, scene, options = {}) {
     for (const m of materials) m.dispose?.();
   }
 
+  function setObserved(on) {
+    if (!st.disposed) st.observed = on === true;
+  }
+
+  function setBlackout(on) {
+    if (st.disposed) return;
+    st.blackout = on === true;
+    setOpacity(st.opacity, true);
+  }
+
   return {
     group,
     update,
@@ -446,6 +633,17 @@ export function createAnimatronic(THREE, scene, options = {}) {
     get stage() {
       return st.stage;
     },
+    get observed() {
+      return st.observed;
+    },
+    get waypointIndex() {
+      return st.wpIndex;
+    },
+    get jumping() {
+      return st.jumping;
+    },
+    setObserved,
+    setBlackout,
     trigger,
     dispose,
   };

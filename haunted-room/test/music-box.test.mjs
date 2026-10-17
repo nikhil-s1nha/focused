@@ -293,3 +293,118 @@ test("dispose cancels the scheduler timer and closes the context", async () => {
   box.tick();
   box.dispose(); // idempotent
 });
+
+/* ----------------------- FNAF wind-down + muffled mode ---------------------- */
+
+// Context variant that also supports lowpass filters (for setMuffled).
+function makeFilterContext() {
+  const { FakeAudioContext, instances } = makeFakeContext();
+  class FilterAudioContext extends FakeAudioContext {
+    createBiquadFilter() {
+      return this._make("filter");
+    }
+  }
+  return { FilterAudioContext, instances };
+}
+
+test("setWind: low wind slows the tempo, drops notes and sags pitch flat", async () => {
+  const { FakeAudioContext, instances } = makeFakeContext();
+  const wound = new MusicBox({ AudioContextImpl: FakeAudioContext, rng: makeRng(11) });
+  await wound.setEnabled(true);
+  wound.update(snap({ tension: 0 }));
+  assert.equal(wound.setWind(1), 1);
+  drive(wound, instances[0], 20);
+  const slack = new MusicBox({ AudioContextImpl: FakeAudioContext, rng: makeRng(11) });
+  await slack.setEnabled(true);
+  slack.update(snap({ tension: 0 }));
+  assert.equal(slack.setWind(0.2), 0.2);
+  drive(slack, instances[1], 20);
+  // Slower: fewer melody slots consumed in the same window.
+  assert.ok(
+    wound.stats.slots > slack.stats.slots * 1.3,
+    `wound ${wound.stats.slots} vs slack ${slack.stats.slots}`,
+  );
+  // Degraded: dropouts appear with zero tension, purely from the slack spring.
+  assert.equal(wound.stats.dropped, 0);
+  assert.ok(slack.stats.dropped / slack.stats.slots > 0.2);
+  // Flat: every scheduled note detunes below zero cents.
+  const slackOscs = instances[1].created.filter((n) => n.kind === "osc");
+  assert.ok(slackOscs.length > 0);
+  assert.ok(
+    slackOscs.every((o) => o.detune.value < 0),
+    "slack spring sags flat",
+  );
+  wound.dispose();
+  slack.dispose();
+});
+
+test("setWind degradation is deterministic for the same rng seed", async () => {
+  const run = async () => {
+    const { FakeAudioContext, instances } = makeFakeContext();
+    const box = new MusicBox({ AudioContextImpl: FakeAudioContext, rng: makeRng(99) });
+    await box.setEnabled(true);
+    box.update(snap({ tension: 0.4 }));
+    box.setWind(0.5);
+    drive(box, instances[0], 25);
+    const starts = oscs(instances[0])
+      .flatMap((o) => o.startCalls)
+      .sort((a, b) => a - b);
+    const out = { starts, stats: { ...box.stats } };
+    box.dispose();
+    return out;
+  };
+  const a = await run();
+  const b = await run();
+  assert.deepEqual(a.stats, b.stats, "identical slot/drop/schedule counts");
+  assert.deepEqual(a.starts, b.starts, "identical note schedule");
+  assert.ok(a.stats.dropped > 0, "degradation actually occurred");
+});
+
+test("setWind(0) stops the box; rewinding restores it", async () => {
+  const { FakeAudioContext, instances } = makeFakeContext();
+  const box = new MusicBox({ AudioContextImpl: FakeAudioContext, rng: () => 0.99 });
+  await box.setEnabled(true);
+  const ctx = instances[0];
+  box.update(snap({ tension: 0 }));
+  drive(box, ctx, 3);
+  const before = box.stats.slots;
+  assert.ok(before > 0);
+  box.setWind(0);
+  drive(box, ctx, 10);
+  assert.equal(box.stats.slots, before, "fully unwound: silence");
+  box.setWind(1);
+  drive(box, ctx, 3);
+  assert.ok(box.stats.slots > before, "rewound: music returns");
+  box.dispose();
+});
+
+test("setMuffled toggles the lowpass voicing when the context supports it", async () => {
+  const { FilterAudioContext, instances } = makeFilterContext();
+  const box = new MusicBox({ AudioContextImpl: FilterAudioContext, rng: () => 0.99 });
+  await box.setEnabled(true);
+  const ctx = instances[0];
+  const tone = ctx.created.find((n) => n.kind === "filter");
+  assert.ok(tone, "tone filter in the chain");
+  assert.ok(tone.connections.includes(master(ctx)), "tone feeds the master");
+  assert.ok(tone.frequency.value > 10000, "open by default");
+  assert.equal(box.setMuffled(true), true);
+  assert.ok(tone.frequency.value < 1000, "muffled pulls the cutoff down");
+  assert.equal(box.setMuffled(false), false);
+  assert.ok(tone.frequency.value > 10000, "restores");
+  // Notes still schedule and route through the bus with the filter present.
+  box.update(snap({ tension: 0 }));
+  drive(box, ctx, 3);
+  assert.ok(box.stats.scheduled > 0);
+  box.dispose();
+});
+
+test("setMuffled/setWind are safe before setEnabled and after dispose", () => {
+  const box = new MusicBox();
+  assert.equal(box.setMuffled(true), true);
+  assert.equal(box.setWind(0.4), 0.4);
+  assert.equal(box.setWind(-3), 0, "clamped");
+  assert.equal(box.setWind(7), 1, "clamped");
+  box.dispose();
+  box.setMuffled(false);
+  box.setWind(1);
+});

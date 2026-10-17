@@ -406,6 +406,158 @@ function paintFabric(f, rand, base) {
   speckle(f, rand, 700, 0.1);
 }
 
+// Peeling paint over dark undercoat: start from grimy plaster, then flake
+// patches away — dark exposed plaster inside, pale curled paint lip around
+// the edge — plus long drips running from the worst patches.
+function paintPeeling(f, rand, base) {
+  paintPlaster(f, rand, base, 0.5);
+  const size = f.size;
+  const patches = 7 + Math.round(rand() * 4);
+  for (let p = 0; p < patches; p++) {
+    const cx = rand() * size;
+    const cy = rand() * size;
+    const r = 14 + rand() * 42;
+    // Pale curled lip first, then the dark exposed core punched inside it.
+    blot(f, cx, cy, r * 1.25, [168, 162, 148], 0.5, 0.2);
+    blot(f, cx + (rand() - 0.5) * 6, cy + (rand() - 0.5) * 6, r,
+      [38, 33, 27], 0.9, -0.3);
+    // Hairline crack radiating off the flake.
+    stroke(f, rand, {
+      x0: cx,
+      y0: cy,
+      dirX: rand() - 0.5,
+      dirY: 0.5 + rand(),
+      steps: 30 + rand() * 40,
+      jitter: 0.6,
+      color: [18, 16, 14],
+      alpha: 0.5,
+      dh: -0.2,
+    });
+    // Grime drip running down from the patch.
+    const dripLen = 40 + rand() * 90;
+    for (let y = 0; y < dripLen; y++)
+      blendPx(f, cx + (rand() - 0.5) * 2, cy + r * 0.6 + y, 26, 25, 21,
+        0.35 * (1 - y / dripLen), -0.04);
+  }
+  speckle(f, rand, 900, 0.1);
+}
+
+// Long claw drags: tight groups of parallel diagonal gouges torn through the
+// plaster, each with a bright torn lip above the dark groove.
+function paintScratches(f, rand, base) {
+  paintPlaster(f, rand, base, 0.35);
+  const size = f.size;
+  const groups = 4;
+  for (let g = 0; g < groups; g++) {
+    const x0 = rand() * size * 0.7;
+    const y0 = size * 0.12 + rand() * size * 0.3;
+    const dirX = 0.25 + rand() * 0.35; // dragging down-right
+    const dirY = 0.9;
+    const claws = 3 + (rand() < 0.5 ? 1 : 0);
+    const spread = 9 + rand() * 7;
+    for (let c = 0; c < claws; c++) {
+      const ox = c * spread;
+      const steps = 90 + rand() * 70;
+      // Torn pale lip just above the gouge...
+      stroke(f, rand, {
+        x0: x0 + ox - 1, y0: y0 - 1, dirX, dirY, steps,
+        jitter: 0.1, color: [150, 146, 134], alpha: 0.5, width: 1, dh: 0.22,
+      });
+      // ...and the deep dark groove itself.
+      stroke(f, rand, {
+        x0: x0 + ox, y0, dirX, dirY, steps,
+        jitter: 0.1, color: [12, 10, 9], alpha: 0.85, width: 2, dh: -0.42,
+      });
+    }
+  }
+  speckle(f, rand, 500, 0.08);
+}
+
+// A child's drawing in wax crayon on yellowed paper. ORIGINAL content, drawn
+// so it reads wrong: a house, a sun, a small family holding hands — and a
+// fourth, far taller figure scribbled in black standing just outside the
+// house, watching. Tape smudges darken the corners.
+function paintDrawing(f, rand) {
+  const size = f.size;
+  const fiber = makeFbm(rand, 64);
+  const inv = 1 / size;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const t = (fiber(x * inv * 40, y * inv * 40, 2) - 0.5) * 0.08;
+      const age = fiber(x * inv * 4, y * inv * 4, 3) * 0.12; // yellowing
+      const i = y * size + x;
+      f.r[i] = 228 * (1 - age * 0.3 + t);
+      f.g[i] = 220 * (1 - age * 0.5 + t);
+      f.b[i] = 198 * (1 - age * 0.9 + t);
+      f.h[i] = 0.5 + t;
+    }
+  }
+  // Crayon line: short wobbly segments, double-struck like a child pressing.
+  const crayon = (x0, y0, x1, y1, color, w = 2) => {
+    const steps = Math.max(2, Math.hypot(x1 - x0, y1 - y0) | 0);
+    for (let pass = 0; pass < 2; pass++) {
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const jx = (rand() - 0.5) * 2.4;
+        const jy = (rand() - 0.5) * 2.4;
+        for (let ww = 0; ww < w; ww++)
+          blendPx(f, x0 + (x1 - x0) * t + jx + ww, y0 + (y1 - y0) * t + jy,
+            color[0], color[1], color[2], 0.5, -0.03);
+      }
+    }
+  };
+  const u = size / 256; // layout in 256-space, scaled to the canvas
+  const RED = [196, 64, 52];
+  const BLUE = [64, 88, 172];
+  const GREEN = [70, 130, 64];
+  const YELL = [214, 178, 60];
+  const BLACK = [24, 22, 24];
+  // Ground and sun.
+  crayon(10 * u, 218 * u, 246 * u, 220 * u, GREEN, 3);
+  blot(f, 224 * u, 36 * u, 13 * u, YELL, 0.8, 0);
+  for (let r = 0; r < 7; r++) {
+    const a = (r / 7) * Math.PI * 2;
+    crayon(224 * u + Math.cos(a) * 17 * u, 36 * u + Math.sin(a) * 17 * u,
+      224 * u + Math.cos(a) * 27 * u, 36 * u + Math.sin(a) * 27 * u, YELL, 1);
+  }
+  // House with a door and one window.
+  crayon(30 * u, 150 * u, 30 * u, 216 * u, RED, 2);
+  crayon(100 * u, 150 * u, 100 * u, 216 * u, RED, 2);
+  crayon(30 * u, 216 * u, 100 * u, 216 * u, RED, 2);
+  crayon(30 * u, 150 * u, 65 * u, 118 * u, RED, 2);
+  crayon(65 * u, 118 * u, 100 * u, 150 * u, RED, 2);
+  crayon(55 * u, 216 * u, 55 * u, 182 * u, BLUE, 2);
+  crayon(55 * u, 182 * u, 72 * u, 182 * u, BLUE, 2);
+  crayon(72 * u, 182 * u, 72 * u, 216 * u, BLUE, 2);
+  crayon(82 * u, 165 * u, 94 * u, 165 * u, BLUE, 1);
+  crayon(82 * u, 165 * u, 82 * u, 177 * u, BLUE, 1);
+  crayon(94 * u, 165 * u, 94 * u, 177 * u, BLUE, 1);
+  crayon(82 * u, 177 * u, 94 * u, 177 * u, BLUE, 1);
+  // Family of three holding hands.
+  const figure = (cx, headY, h, color) => {
+    blot(f, cx, headY, 6 * u, color, 0.55, -0.02); // head
+    crayon(cx, headY + 6 * u, cx, headY + h, color, 2); // body
+    crayon(cx - 10 * u, headY + 14 * u, cx + 10 * u, headY + 14 * u, color, 1);
+    crayon(cx, headY + h, cx - 8 * u, headY + h + 14 * u, color, 1);
+    crayon(cx, headY + h, cx + 8 * u, headY + h + 14 * u, color, 1);
+  };
+  figure(136 * u, 176 * u, 26 * u, RED);
+  figure(160 * u, 180 * u, 22 * u, BLUE);
+  figure(182 * u, 184 * u, 18 * u, GREEN);
+  crayon(136 * u, 190 * u, 182 * u, 196 * u, RED, 1); // held hands
+  // The wrong one: a fourth figure, three times too tall, scribbled black,
+  // standing beside the house. No held hand. It is looking at the family.
+  for (let s = 0; s < 14; s++)
+    crayon(108 * u + (rand() - 0.5) * 7 * u, 96 * u + rand() * 4 * u,
+      108 * u + (rand() - 0.5) * 7 * u, 214 * u - rand() * 4 * u, BLACK, 2);
+  blot(f, 108 * u, 88 * u, 9 * u, BLACK, 0.85, -0.03); // head
+  blendPx(f, 105 * u, 87 * u, 236, 234, 228, 0.95, 0); // two pale eyes
+  blendPx(f, 111 * u, 87 * u, 236, 234, 228, 0.95, 0);
+  // Tape smudges in the corners.
+  for (const [tx, ty] of [[10, 10], [size - 10, 10], [10, size - 10], [size - 10, size - 10]])
+    blot(f, tx, ty, 14, [168, 158, 128], 0.5, 0.06);
+}
+
 // --- role table -------------------------------------------------------------
 
 const C = {
@@ -471,6 +623,25 @@ const ROLES = {
     // saves one 512x512 GPU upload on Quest).
     bumpFrom: "wallPlaster",
   },
+  // Decay set — peeling paint, claw drags and the taped-up drawing.
+  wallDamaged: {
+    size: 512,
+    repeat: [1, 1],
+    mat: { roughness: 0.97, metalness: 0, bumpScale: 0.045 },
+    paint: (f, rand) => paintPeeling(f, rand, C.plaster),
+  },
+  scratchedPlaster: {
+    size: 512,
+    repeat: [1, 1],
+    mat: { roughness: 0.95, metalness: 0, bumpScale: 0.05 },
+    paint: (f, rand) => paintScratches(f, rand, C.plaster),
+  },
+  paperDrawing: {
+    size: 256,
+    repeat: [1, 1],
+    mat: { roughness: 1, metalness: 0, bumpScale: 0.01 },
+    paint: (f, rand) => paintDrawing(f, rand),
+  },
 };
 
 // Flat fallback colors (match environment.mjs defaults) for headless Node.
@@ -483,6 +654,9 @@ const FLAT = {
   metalAged: { color: 0x565a4b, roughness: 0.7, metalness: 0.3 },
   fabricWorn: { color: 0x3b2d27, roughness: 1 },
   corridorWall: { color: 0x1a1e1b, roughness: 1 },
+  wallDamaged: { color: 0x37392f, roughness: 1 },
+  scratchedPlaster: { color: 0x3a403a, roughness: 1 },
+  paperDrawing: { color: 0xcfc8b4, roughness: 1 },
 };
 
 // --- library ----------------------------------------------------------------
