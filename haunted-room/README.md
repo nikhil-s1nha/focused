@@ -57,7 +57,16 @@ Replace SCENE_HOST with the scene laptop's reachable address. On the Pi, 127.0.0
 
 ## Quest 3S — prove this before polishing art
 
-### Quick USB route
+### One-command route (recommended)
+
+```sh
+npm run quest            # add `-- --port 9000` for another port
+npm run quest:record     # also records the headset view (needs scrcpy)
+```
+
+First time only: enable Developer Mode in the Meta Horizon phone app (needs a developer account), plug in USB-C, put the headset on, accept **Allow USB debugging** (tick Always allow). Then the script installs `adb` via Homebrew if missing, starts the scene server if it is not running, waits for an authorized headset, runs `adb reverse`, opens Quest Browser on the page, and re-applies everything if you unplug and replug. Ctrl+C removes the forward and stops any server it started. It prints a specific message for no device, unauthorized, or offline. `/healthz` on the server reports that it is up. This path is untested on a physical headset so far.
+
+### Manual USB route
 
 1. Enable Quest developer mode, install Android platform tools, connect the headset by USB and authorize debugging yourself in the headset.
 2. `adb devices` should list it as `device`.

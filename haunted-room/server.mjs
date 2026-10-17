@@ -55,6 +55,15 @@ export function createSceneServer({
       res.writeHead(405).end();
       return;
     }
+    if (pathname === "/healthz") {
+      res
+        .writeHead(200, {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        })
+        .end(JSON.stringify({ ok: true, viewers: sockets.clients.size }));
+      return;
+    }
     let file;
     if (pathname === "/vendor/three.module.js")
       file = path.join(root, "node_modules/three/build/three.module.js");
