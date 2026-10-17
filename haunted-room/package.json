@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test test/*.test.mjs",
-    "mock": "node mock-feed.mjs"
+    "mock": "node mock-feed.mjs",
+    "quest": "sh scripts/quest-usb.sh"
   },
   "dependencies": {
     "three": "0.186.1",
@@ -14,5 +15,9 @@
   },
   "engines": {
     "node": ">=20.19"
+  },
+  "devDependencies": {
+    "iwer": "^2.6.0",
+    "playwright": "^1.64.1"
   }
 }

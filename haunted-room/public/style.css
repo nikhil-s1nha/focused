@@ -1,7 +1,26 @@
+/* Focused / The Quiet Room — director studio shell.
+   Dark neutrals, single ember accent, system fonts only. */
+
 :root {
-  font-family: Arial, sans-serif;
-  color: #e2dfd3;
-  background: #090b0b;
+  --bg: #0a0c0d;
+  --panel: rgba(16, 19, 20, 0.86);
+  --panel-solid: #121516;
+  --line: #2b3133;
+  --line-soft: #1e2425;
+  --text: #e9e7df;
+  --text-dim: #a6ac9f;
+  --text-faint: #8d9489;
+  --accent: #d9a648;
+  --accent-ink: #1c1507;
+  --danger: #e8a68f;
+  --sans:
+    ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: dark;
+  font-family: var(--sans);
+  color: var(--text);
+  background: var(--bg);
   font-synthesis: none;
 }
 * {
@@ -9,286 +28,600 @@
 }
 body {
   margin: 0;
+  overflow: hidden;
 }
+
+/* ---------- scene ---------- */
 #viewport {
   position: fixed;
   inset: 0;
+  z-index: 0;
 }
 canvas {
   display: block;
 }
-#overlay {
-  position: relative;
-  pointer-events: none;
-  padding: 30px 38px;
-  min-height: 100vh;
+
+/* ---------- shared utilities ---------- */
+.hidden {
+  display: none !important;
 }
-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
-header a {
-  font-size: 18px;
-  letter-spacing: 3px;
-  color: #e3e2d6;
-  text-decoration: none;
-  pointer-events: auto;
-}
-header a span {
-  margin-left: 24px;
-  font-size: 8px;
-  letter-spacing: 2px;
-  color: #92998f;
-}
-.tag {
-  font-size: 9px;
-  letter-spacing: 2px;
-  border: 1px solid #535950;
-  padding: 10px 14px;
-  border-radius: 20px;
-}
-.title {
-  position: absolute;
-  top: 19vh;
-  left: 38px;
-  max-width: 340px;
-}
-.eyebrow {
-  font-size: 9px;
-  letter-spacing: 2px;
-  color: #abb49e;
-}
-h1 {
-  font:
-    400 clamp(56px, 7vw, 100px)/0.95 Georgia,
-    serif;
-  letter-spacing: -3px;
-  margin: 28px 0;
-}
-h1 i {
-  font-weight: 400;
-  color: #bfc6ac;
-}
-.description {
-  font-size: 12px;
-  line-height: 1.9;
-  color: #9aab9d;
-}
-#sessionState {
-  font-size: 11px;
-  margin-top: 30px;
-  color: #bac4ac;
-  max-width: 260px;
-  line-height: 1.7;
-}
-.row {
-  display: flex;
-  gap: 8px;
-  pointer-events: auto;
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 button,
 select,
-input[type="number"] {
-  color: #e0e4d7;
-  background: #17201ddd;
-  border: 1px solid #4b584b;
-  border-radius: 4px;
-  font: 11px Arial;
-  padding: 12px;
-  margin-top: 10px;
-  cursor: pointer;
+input,
+output {
+  font: 12px/1.3 var(--sans);
+  color: var(--text);
 }
-.primary {
-  background: #b6c59c;
-  color: #1b2219;
-  border: 0;
+button {
+  background: #1a1f20;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 button:hover {
-  filter: brightness(1.2);
+  border-color: var(--accent);
+  background: #20262a;
 }
-aside {
-  position: absolute;
-  right: 38px;
-  top: 21vh;
-  width: 235px;
-  padding: 20px;
-  background: #111916bd;
-  border: 1px solid #354236;
-  backdrop-filter: blur(12px);
-  pointer-events: auto;
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
 }
-label {
-  display: block;
-  font-size: 9px;
-  letter-spacing: 1.4px;
-  color: #a5b29e;
-  margin-top: 18px;
+button.primary:hover {
+  filter: brightness(1.08);
 }
-select {
-  display: block;
+button.wide {
   width: 100%;
-  margin-top: 9px;
-  padding: 9px;
+}
+select,
+input[type="number"] {
+  width: 100%;
+  background: #15191a;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 7px 8px;
 }
 input[type="range"] {
   display: block;
   width: 100%;
-  accent-color: #c0cc9f;
-  margin: 14px 0;
+  margin: 8px 0 2px;
+  accent-color: var(--accent);
 }
-output {
-  float: right;
+input[type="checkbox"] {
+  accent-color: var(--accent);
 }
-.help {
+kbd {
+  font-family: var(--mono);
   font-size: 10px;
-  line-height: 1.7;
-  color: #91a18e;
+  background: #1a1f20;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 2px 6px;
 }
-.check {
+.pill {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 16px;
+  font-size: 12px;
+  color: var(--text);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.eyebrow {
   font-size: 10px;
-  letter-spacing: 0;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+  margin: 0 0 10px;
+}
+
+/* ---------- top header strip ---------- */
+.topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line-soft);
+  backdrop-filter: blur(12px);
+}
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+.brand-mark {
+  color: var(--accent);
+  font-size: 13px;
+}
+.brand-name {
+  font-size: 14px;
+  letter-spacing: 3px;
+}
+.brand-sub {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--text-faint);
+}
+.topbar-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.badge {
+  font-size: 10px;
+  letter-spacing: 1px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.badge-state {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  text-transform: uppercase;
+}
+.topbar-session {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 70px;
+}
+.topbar-session .mono {
+  font-size: 13px;
+}
+.progress {
+  flex: 1;
+  height: 4px;
+  min-width: 40px;
+  max-width: 260px;
+  background: #1c2122;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-fill {
+  width: 0%;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width 0.4s ease;
+}
+.topbar-actions {
   display: flex;
   gap: 6px;
-  align-items: center;
 }
-.check input {
-  accent-color: #b5c797;
+#consoleToggle[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
 }
-details {
-  border-top: 1px solid #3b483b;
-  margin-top: 20px;
-  padding-top: 15px;
-}
-summary {
-  font-size: 10px;
-  color: #b9c5ad;
-  cursor: pointer;
-}
-input[type="number"] {
-  width: 100%;
-  padding: 7px;
-}
-#error {
-  font-size: 10px;
-  color: #e5b4a5;
-}
-.diagnostics {
+
+/* ---------- onboarding card (#overlay) ---------- */
+#overlay {
   position: fixed;
-  left: 38px;
-  right: 38px;
-  bottom: 67px;
+  inset: 0;
+  z-index: 25;
   display: flex;
-  gap: 55px;
-  border-top: 1px solid #3a453b;
-  padding-top: 18px;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  padding: 70px 16px 120px;
 }
-.diagnostics small {
-  display: block;
-  font-size: 8px;
-  letter-spacing: 2px;
-  color: #84947f;
+.onboard-card {
+  pointer-events: auto;
+  width: min(420px, 94vw);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 22px 24px;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
 }
-.diagnostics strong {
-  display: block;
-  font-weight: 400;
-  font-size: 17px;
-  margin-top: 9px;
+.onboard-card h1 {
+  margin: 0 0 12px;
+  font: 400 24px/1.25 Georgia, "Times New Roman", serif;
+  letter-spacing: -0.3px;
 }
-footer {
+.onboard-steps {
+  margin: 0 0 16px;
+  padding-left: 20px;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: var(--text-dim);
+}
+.onboard-steps strong {
+  color: var(--text);
+}
+.onboard-note {
+  margin: 12px 0 0;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+#overlay .primary {
+  width: 100%;
+  padding: 11px;
+  font-size: 13px;
+}
+
+/* ---------- director console ---------- */
+#directorConsole {
   position: fixed;
-  bottom: 24px;
-  left: 38px;
-  right: 38px;
+  top: 56px;
+  right: 12px;
+  bottom: 118px;
+  z-index: 18;
+  width: 272px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  backdrop-filter: blur(12px);
+  transition: transform 0.25s ease, opacity 0.25s ease, visibility 0.25s;
+}
+.console-title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.field {
+  margin-top: 14px;
+}
+.field label,
+.toggles legend,
+.presets legend {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.field output {
+  float: right;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+}
+.range-ends {
   display: flex;
   justify-content: space-between;
   font-size: 9px;
-  color: #7e8f7d;
+  letter-spacing: 0.6px;
+  color: var(--text-faint);
 }
-#VRButton {
-  z-index: 10 !important;
-  bottom: 65px !important;
-  left: auto !important;
-  right: 38px !important;
-  width: 165px !important;
-  background: #202a20dd !important;
-  border: 1px solid #a2b28e !important;
-  font: 11px Arial !important;
+.btn-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+  flex-wrap: wrap;
 }
-@media (max-width: 760px) {
-  #overlay {
-    padding: 20px;
+.btn-row button {
+  flex: 1;
+  min-width: 56px;
+}
+fieldset {
+  margin: 16px 0 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--text);
+  margin-top: 7px;
+  cursor: pointer;
+}
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.grid-2 .field {
+  margin-top: 14px;
+}
+.presets .btn-row {
+  margin-top: 2px;
+}
+#exportSession {
+  margin-top: 16px;
+}
+.console-note {
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--text-faint);
+  margin: 12px 0 0;
+}
+/* Collapsed state (integration agent toggles .open / .collapsed). */
+#directorConsole.open {
+  transform: none;
+  opacity: 1;
+  visibility: visible;
+}
+#directorConsole.collapsed {
+  transform: translateX(calc(100% + 24px));
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* ---------- center reticle & hint ---------- */
+#crosshair {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 12;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 1.5px solid rgba(233, 231, 223, 0.85);
+  border-radius: 50%;
+  pointer-events: none;
+}
+#crosshair::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 2px;
+  margin: -1px 0 0 -1px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+#interactHint {
+  top: calc(50% + 26px);
+  z-index: 12;
+}
+
+/* ---------- toast ---------- */
+#toast {
+  top: 58px;
+  z-index: 30;
+  animation: toast-in 0.25s ease;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
   }
-  header a span,
-  .tag {
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* ---------- diagnostics ---------- */
+.diagnostics {
+  position: fixed;
+  left: 14px;
+  bottom: 12px;
+  z-index: 15;
+  display: flex;
+  flex-wrap: wrap-reverse;
+  align-items: flex-end;
+  column-gap: 22px;
+  row-gap: 8px;
+  max-width: min(600px, calc(50vw - 80px));
+  pointer-events: none;
+}
+.diag small {
+  display: block;
+  font-size: 8px;
+  letter-spacing: 1.8px;
+  color: var(--text-faint);
+}
+.diag strong {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--text);
+}
+#error {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--danger);
+}
+#error:empty {
+  display: none;
+}
+
+/* ---------- help panel ---------- */
+.panel {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 40;
+  width: min(460px, 92vw);
+  max-height: min(78vh, 560px);
+  overflow-y: auto;
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 20px 22px;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.55);
+}
+.panel h2 {
+  margin: 0 0 14px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.panel p {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-dim);
+}
+.panel p strong {
+  color: var(--text);
+}
+.keys {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr;
+  gap: 8px 12px;
+  align-items: center;
+  margin: 0 0 14px;
+}
+.keys dt {
+  margin: 0;
+  text-align: right;
+}
+.keys dd {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+/* ---------- summary modal ---------- */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(5, 6, 7, 0.6);
+  backdrop-filter: blur(4px);
+}
+.modal-card {
+  width: min(440px, 94vw);
+  max-height: 84vh;
+  overflow-y: auto;
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 22px 24px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+}
+.modal-card h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+#summaryContent {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-dim);
+}
+#dismissSummary {
+  margin-top: 18px;
+  width: 100%;
+  padding: 10px;
+}
+
+/* ---------- WebXR VRButton (appended to body by Three.js) ----------
+   It self-positions bottom-center; keep that zone clear, theme only. */
+#VRButton {
+  z-index: 16 !important;
+  bottom: 16px !important;
+  background: rgba(20, 24, 25, 0.9) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--text-dim) !important;
+  font: 11px var(--sans) !important;
+  border-radius: 6px !important;
+  opacity: 1 !important;
+}
+
+/* ---------- narrow screens ---------- */
+@media (max-width: 880px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+  .brand-sub,
+  #connection {
     display: none;
   }
-  .title {
-    left: 20px;
-    top: 14vh;
-    width: 180px;
+  .topbar-session {
+    order: 3;
+    flex-basis: 100%;
   }
-  h1 {
-    font-size: 62px;
+  .progress {
+    max-width: none;
   }
-  .title .eyebrow {
-    max-width: 140px;
-    line-height: 1.5;
+  /* Console collapses by default on narrow screens; .open reveals it. */
+  #directorConsole {
+    top: 86px;
+    right: 10px;
+    bottom: 128px;
+    width: min(320px, 88vw);
+    transform: translateX(calc(100% + 24px));
+    opacity: 0;
+    visibility: hidden;
   }
-  aside {
-    right: 20px;
-    top: 18vh;
-    width: 180px;
-    padding: 14px;
+  #directorConsole.open {
+    transform: none;
+    opacity: 1;
+    visibility: visible;
+  }
+  #directorConsole.collapsed {
+    transform: translateX(calc(100% + 24px));
+    opacity: 0;
+    visibility: hidden;
+  }
+  #overlay {
+    padding: 96px 12px 140px;
   }
   .diagnostics {
-    left: 20px;
-    right: 20px;
-    gap: 20px;
-    bottom: 65px;
+    left: 10px;
+    right: 10px;
+    bottom: 64px; /* keep bottom-center clear for VRButton */
+    max-width: none;
+    column-gap: 16px;
   }
-  .diagnostics strong {
-    font-size: 12px;
+  .diag strong {
+    font-size: 11.5px;
   }
-  .diagnostics small {
-    font-size: 7px;
-  }
-  footer {
-    left: 20px;
-    right: 20px;
-    bottom: 14px;
-    font-size: 8px;
-    max-width: 60%;
-    line-height: 1.5;
-  }
-  footer span:last-child {
-    display: none;
-  }
-  #VRButton {
-    bottom: 150px !important;
-    right: 20px !important;
-    width: 145px !important;
+  #toast {
+    top: 92px;
   }
 }
-@media (max-height: 700px) {
-  aside {
-    top: 110px;
-  }
-  aside label {
-    margin-top: 10px;
-  }
-  .title {
-    top: 110px;
-  }
-  h1 {
-    margin: 15px 0;
-    font-size: 64px;
-  }
-  #sessionState {
-    margin-top: 15px;
-  }
-  details {
-    max-height: 130px;
-    overflow: auto;
+
+/* ---------- motion preferences ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

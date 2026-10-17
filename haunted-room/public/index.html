@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
     <title>Focused / The Quiet Room</title>
     <link rel="stylesheet" href="/style.css" />
     <script type="importmap">
@@ -15,104 +16,285 @@
     </script>
   </head>
   <body>
+    <!-- 3D scene: full viewport, UI floats above it -->
     <div id="viewport"></div>
-    <main id="overlay">
-      <header>
-        <a href="/"
-          >◉ FOCUSED <span>PHYSIOLOGICAL ADAPTATION / PROTOTYPE 01</span></a
-        ><span class="tag">QUEST 3S / WEBXR</span>
-      </header>
-      <section class="title">
-        <p class="eyebrow">AN EXPERIMENT IN RESPONSIVE ATMOSPHERE</p>
-        <h1>The quiet<br /><i>room.</i></h1>
-        <p class="description">
-          Stay a while. The room listens.<br />A two-minute adaptive VR
-          experience.
-        </p>
-        <div id="sessionState" role="status">Ready when you are.</div>
-        <div class="row">
-          <button id="start" class="primary">Begin experience ↗</button
-          ><button id="reset">Reset</button>
-        </div>
-      </section>
-      <aside>
-        <p class="eyebrow">DIRECTOR CONSOLE</p>
-        <label
-          >INPUT SOURCE<select id="source">
-            <option value="manual">Manual demo</option>
-            <option value="synthetic">Synthetic demo</option>
-            <option value="live">Live stream</option>
-          </select></label
-        ><label
-          >RESPONSE PROXY <output id="intensityValue">0.50</output
-          ><input
-            id="intensity"
-            type="range"
-            min="0"
-            max="1"
-            step=".01"
-            value=".5"
-        /></label>
-        <p class="help">
-          Low input builds tension. Sustained high input creates relief. This is
-          a control proxy, not a fear measurement.
-        </p>
-        <label class="check"
-          ><input type="checkbox" id="sound" /> Opt in to spatial sound</label
+
+    <!-- Compact top header strip -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">&#9673;</span>
+        <span class="brand-name">FOCUSED</span>
+        <span class="brand-sub">THE QUIET ROOM</span>
+      </div>
+      <div class="topbar-status">
+        <span id="sessionState" class="badge badge-state" role="status">Ready</span>
+        <span id="connection" class="badge">Manual demo &middot; no hardware connected</span>
+      </div>
+      <div class="topbar-session">
+        <span id="timeStat" class="mono" aria-label="Time remaining">2:00</span>
+        <div
+          id="progressBar"
+          class="progress"
+          role="progressbar"
+          aria-label="Session progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
         >
-        <details>
-          <summary>Creator settings</summary>
-          <label class="check"
-            ><input type="checkbox" id="lighting" checked /> Adaptive
-            lighting</label
-          ><label class="check"
-            ><input type="checkbox" id="fog" checked /> Adaptive fog</label
-          ><label class="check"
-            ><input type="checkbox" id="shadow" checked /> Shadow
-            encounter</label
-          ><label
-            >SHADOW POSITION<select id="position">
-              <option value="back">Back doorway</option>
-              <option value="left">Left corner</option>
-              <option value="right">Right corner</option>
-            </select></label
-          ><label
-            >LOW THRESHOLD
-            <input
-              id="low"
-              type="number"
-              min="0"
-              max="0.6"
-              step=".05"
-              value=".30" /></label
-          ><label
-            >HIGH THRESHOLD
-            <input
-              id="high"
-              type="number"
-              min=".65"
-              max="1"
-              step=".05"
-              value=".75"
-          /></label>
-        </details>
-        <p id="connection" class="help">Manual demo · no hardware connected</p>
-        <p id="error" role="alert"></p>
-      </aside>
-      <section class="diagnostics">
-        <div><small>SOURCE</small><strong id="sourceStat">MANUAL</strong></div>
-        <div><small>DIRECTOR</small><strong id="stateStat">WAIT</strong></div>
-        <div><small>TENSION</small><strong id="tensionStat">0.12</strong></div>
-        <div><small>QUALITY</small><strong id="qualityStat">1.00</strong></div>
-        <div><small>TIME LEFT</small><strong id="timeStat">2:00</strong></div>
+          <div class="progress-fill"></div>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button id="pause" type="button">Pause</button>
+        <button id="reset" type="button">Reset</button>
+        <button
+          id="helpToggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="helpPanel"
+        >
+          Help
+        </button>
+        <button
+          id="consoleToggle"
+          type="button"
+          aria-expanded="true"
+          aria-controls="directorConsole"
+        >
+          Console
+        </button>
+      </div>
+    </header>
+
+    <!-- Compact centered onboarding card (pre-start). Never covers the room. -->
+    <main id="overlay" aria-label="Getting started">
+      <section class="onboard-card">
+        <p class="eyebrow">ADAPTIVE ATMOSPHERE &middot; PROTOTYPE 01</p>
+        <h1>The quiet room is listening.</h1>
+        <ol class="onboard-steps">
+          <li><strong>Press Begin</strong> to start the session.</li>
+          <li>
+            Slider <strong>LOW builds tension</strong>, HIGH gives relief
+            &mdash; changes take a few seconds.
+          </li>
+          <li><strong>Sound stays off</strong> until you enable it in the console.</li>
+        </ol>
+        <button id="start" type="button" class="primary">Begin experience</button>
+        <p class="onboard-note">
+          Drag to look around. On desktop, &ldquo;VR NOT SUPPORTED&rdquo; is
+          expected.
+        </p>
       </section>
-      <footer>
-        <span
-          >Drag to look · No forced movement · In VR: trigger to begin/reset,
-          A/X to toggle sound</span
-        ><span>Simulated input is always labeled.</span>
-      </footer>
     </main>
+
+    <!-- Collapsible right-side director console -->
+    <aside id="directorConsole" aria-label="Director console">
+      <h2 class="console-title">Director console</h2>
+
+      <div class="field">
+        <label for="source">Input source</label>
+        <select id="source">
+          <option value="manual">Manual demo</option>
+          <option value="synthetic">Synthetic demo</option>
+          <option value="live">Live stream</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="intensity"
+          >Response proxy <output id="intensityValue" for="intensity">0.50</output></label
+        >
+        <input id="intensity" type="range" min="0" max="1" step="0.01" value="0.5" />
+        <div class="range-ends" aria-hidden="true">
+          <span>LOW &middot; tension builds</span><span>HIGH &middot; relief</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="quality"
+          >Signal quality <output id="qualityValue" for="quality">1.00</output></label
+        >
+        <input id="quality" type="range" min="0" max="1" step="0.01" value="1" />
+      </div>
+
+      <div class="btn-row" role="group" aria-label="Quick presets">
+        <button id="presetTense" type="button">Build</button>
+        <button id="presetCalm" type="button">Relief</button>
+      </div>
+
+      <div class="field">
+        <label for="scenario">Scenario</label>
+        <select id="scenario">
+          <option value="cycle">Cycle</option>
+          <option value="low">Sustained low</option>
+          <option value="high">Sustained high</option>
+          <option value="dropout">Dropout</option>
+          <option value="artifacts">Artifacts</option>
+        </select>
+      </div>
+
+      <fieldset class="toggles">
+        <legend>Effects</legend>
+        <label class="check"
+          ><input type="checkbox" id="sound" /> Spatial sound (opt in)</label
+        >
+        <label class="check"
+          ><input type="checkbox" id="lighting" checked /> Adaptive lighting</label
+        >
+        <label class="check"
+          ><input type="checkbox" id="fog" checked /> Adaptive fog</label
+        >
+        <label class="check"
+          ><input type="checkbox" id="shadow" checked /> Shadow encounter</label
+        >
+      </fieldset>
+
+      <div class="field">
+        <label for="position">Shadow position</label>
+        <select id="position">
+          <option value="back">Back doorway</option>
+          <option value="left">Left corner</option>
+          <option value="right">Right corner</option>
+        </select>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="low">Low threshold</label>
+          <input id="low" type="number" min="0" max="0.6" step="0.05" value="0.30" />
+        </div>
+        <div class="field">
+          <label for="high">High threshold</label>
+          <input id="high" type="number" min="0.65" max="1" step="0.05" value="0.75" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="volume"
+          >Volume <output id="volumeValue" for="volume">0.60</output></label
+        >
+        <input id="volume" type="range" min="0" max="1" step="0.01" value="0.6" />
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="duration">Duration</label>
+          <select id="duration">
+            <option value="60">1 minute</option>
+            <option value="120" selected>2 minutes</option>
+            <option value="180">3 minutes</option>
+            <option value="300">5 minutes</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="atmosphere">Atmosphere</label>
+          <select id="atmosphere">
+            <option value="observatory">Observatory</option>
+            <option value="cold">Cold</option>
+            <option value="ember">Ember</option>
+          </select>
+        </div>
+      </div>
+
+      <fieldset class="presets">
+        <legend>Creator presets</legend>
+        <div class="btn-row">
+          <button id="savePreset" type="button">Save</button>
+          <button id="exportPreset" type="button">Export</button>
+          <button id="importPreset" type="button">Import</button>
+          <button id="resetPreset" type="button">Reset</button>
+        </div>
+      </fieldset>
+
+      <button id="exportSession" type="button" class="wide">
+        Export session summary
+      </button>
+
+      <p class="console-note">
+        Simulated input is always labeled. This is a control proxy, not a fear
+        measurement.
+      </p>
+    </aside>
+
+    <!-- Center-screen reticle and interaction hint (hidden until wired) -->
+    <div id="crosshair" class="hidden" aria-hidden="true"></div>
+    <div id="interactHint" class="pill hidden">Press E to interact</div>
+
+    <!-- Transient message pill -->
+    <div id="toast" class="pill hidden" role="status" aria-live="polite"></div>
+
+    <!-- Bottom-left diagnostics strip -->
+    <section class="diagnostics" aria-label="Session diagnostics">
+      <div class="diag"><small>SOURCE</small><strong id="sourceStat">MANUAL</strong></div>
+      <div class="diag"><small>DIRECTOR</small><strong id="stateStat">WAIT</strong></div>
+      <div class="diag"><small>TENSION</small><strong id="tensionStat">0.00</strong></div>
+      <div class="diag"><small>QUALITY</small><strong id="qualityStat">1.00</strong></div>
+      <div class="diag">
+        <small>ENCOUNTER</small><strong id="encounterStat">&ndash;</strong>
+      </div>
+      <div class="diag"><small>FPS</small><strong id="fpsStat">&ndash;</strong></div>
+      <div class="diag"><small>RATE</small><strong id="rateStat">&ndash;</strong></div>
+      <div class="diag">
+        <small>SIGNAL AGE</small><strong id="signalAgeStat">&ndash;</strong>
+      </div>
+      <p id="error" role="alert"></p>
+    </section>
+
+    <!-- Help panel (hidden by default) -->
+    <section
+      id="helpPanel"
+      class="panel hidden"
+      role="dialog"
+      aria-labelledby="helpTitle"
+    >
+      <h2 id="helpTitle">Help &amp; shortcuts</h2>
+      <dl class="keys">
+        <dt><kbd>Space</kbd></dt>
+        <dd>Start / pause</dd>
+        <dt><kbd>R</kbd></dt>
+        <dd>Reset</dd>
+        <dt><kbd>1</kbd></dt>
+        <dd>Build preset</dd>
+        <dt><kbd>2</kbd></dt>
+        <dd>Relief preset</dd>
+        <dt><kbd>E</kbd></dt>
+        <dd>Interact</dd>
+        <dt><kbd>H</kbd></dt>
+        <dd>Toggle help</dd>
+        <dt><kbd>F</kbd></dt>
+        <dd>Fullscreen</dd>
+        <dt><kbd>Drag</kbd></dt>
+        <dd>Look around</dd>
+        <dt><kbd>WASD</kbd></dt>
+        <dd>Walk</dd>
+      </dl>
+      <p>
+        The response-proxy slider is inverted on purpose: <strong>LOW input
+        builds tension</strong>, sustained HIGH input brings relief. Smoothing
+        means changes take a few seconds, never instant jumps.
+      </p>
+      <p>
+        Live stream mode shows <strong>WAIT</strong> until a publisher sends
+        data. On desktop browsers, &ldquo;VR NOT SUPPORTED&rdquo; is expected
+        &mdash; flat rendering still works.
+      </p>
+    </section>
+
+    <!-- End-of-session summary (hidden by default) -->
+    <div
+      id="summaryPanel"
+      class="modal hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="summaryTitle"
+    >
+      <div class="modal-card">
+        <h2 id="summaryTitle">Session summary</h2>
+        <div id="summaryContent"></div>
+        <button id="dismissSummary" type="button" class="primary">Close</button>
+      </div>
+    </div>
+
     <script type="module" src="/app.mjs"></script>
   </body>
 </html>
