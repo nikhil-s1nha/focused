@@ -7,7 +7,9 @@
     "start": "node server.mjs",
     "test": "node --test test/*.test.mjs",
     "mock": "node mock-feed.mjs",
-    "quest": "sh scripts/quest-usb.sh"
+    "quest": "sh scripts/quest-usb.sh",
+    "test:xr": "node --test --test-concurrency=1 test-xr/*.test.mjs",
+    "test:xr:install": "playwright install chromium"
   },
   "dependencies": {
     "three": "0.186.1",

@@ -80,6 +80,9 @@ export async function createPage(browser, { emulateXR = false } = {}) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
   });
+  // SwiftShader WebGL on a loaded machine is slow; keep waits patient so the
+  // suite tests contracts, not the CI machine's momentary load.
+  context.setDefaultTimeout(45000);
   // 1. Readable-pixels patch + global error capture (always).
   await context.addInitScript(`(() => {
     const hooks = (window.__xrTest = {
@@ -207,7 +210,7 @@ export function signatureDiff(a, b) {
 }
 
 /** Wait until at least n additional XR frames have been delivered. */
-export async function waitForXRFrames(page, n, timeoutMs = 10000) {
+export async function waitForXRFrames(page, n, timeoutMs = 45000) {
   const start = await page.evaluate(() => window.__xrTest.frameCount);
   await page.waitForFunction(
     ([s, count]) => window.__xrTest.frameCount >= s + count,

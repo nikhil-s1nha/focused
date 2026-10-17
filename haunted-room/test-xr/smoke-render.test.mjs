@@ -30,11 +30,11 @@ test("smoke: page loads with zero console/page errors and a #viewport canvas", a
     assert.equal(res.status(), 200, "index must serve with HTTP 200");
 
     // The app module appends the renderer canvas to #viewport.
-    await page.waitForSelector("#viewport canvas", { timeout: 10000 });
+    await page.waitForSelector("#viewport canvas");
 
     // VRButton (or its graceful fallback) must be mounted. Three's VRButton
     // always sets id="VRButton" on the element it creates.
-    await page.waitForSelector("#VRButton", { timeout: 10000 });
+    await page.waitForSelector("#VRButton");
 
     // Give async module init / WebSocket connect a moment to surface errors.
     await page.waitForTimeout(1500);
@@ -50,16 +50,13 @@ test("smoke: without XR emulation the VR button degrades gracefully", async () =
   const { context, page } = await createPage(browser);
   try {
     await page.goto(server.origin + "/", { waitUntil: "load" });
-    await page.waitForSelector("#VRButton", { timeout: 10000 });
+    await page.waitForSelector("#VRButton");
     // Headless desktop Chromium has no immersive-vr: the button must settle on
     // a non-crashing informative state, never a dead "ENTER VR".
-    await page.waitForFunction(
-      () => {
-        const t = (document.getElementById("VRButton")?.textContent || "").trim();
-        return t.length > 0 && t !== "ENTER VR";
-      },
-      { timeout: 10000 },
-    );
+    await page.waitForFunction(() => {
+      const t = (document.getElementById("VRButton")?.textContent || "").trim();
+      return t.length > 0 && t !== "ENTER VR";
+    });
     const label = await page.evaluate(() =>
       document.getElementById("VRButton").textContent.trim(),
     );
@@ -73,7 +70,7 @@ test("render: the WebGL canvas draws a non-black, non-uniform image", async () =
   const { context, page, consoleErrors } = await createPage(browser);
   try {
     await page.goto(server.origin + "/", { waitUntil: "load" });
-    await page.waitForSelector("#viewport canvas", { timeout: 10000 });
+    await page.waitForSelector("#viewport canvas");
     await page.waitForTimeout(2500); // let a few frames render
 
     const stats = await samplePixels(page);

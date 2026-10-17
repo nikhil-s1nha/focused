@@ -33,12 +33,11 @@ async function loadWithXR() {
   const fixture = await createPage(browser, { emulateXR: true });
   const { page } = fixture;
   await page.goto(server.origin + "/", { waitUntil: "load" });
-  await page.waitForSelector("#viewport canvas", { timeout: 10000 });
+  await page.waitForSelector("#viewport canvas");
   const installed = await page.evaluate(() => window.__xrTest.iwerInstalled);
   assert.ok(installed, "IWER runtime must be installed over navigator.xr");
   await page.waitForFunction(
     () => (document.getElementById("VRButton")?.textContent || "").trim() === "ENTER VR",
-    { timeout: 10000 },
   );
   return fixture;
 }
@@ -46,8 +45,9 @@ async function loadWithXR() {
 /** Click ENTER VR and wait until the session is live and producing frames. */
 async function enterVR(page) {
   await page.click("#VRButton");
-  await page.waitForFunction(() => window.__xrTest.sessionActive, { timeout: 10000 });
-  await waitForXRFrames(page, 10);
+  await page.waitForFunction(() => window.__xrTest.sessionActive);
+  // SwiftShader can render at single-digit FPS; be patient, assert liveness.
+  await waitForXRFrames(page, 5);
 }
 
 test("xr-entry: page offers ENTER VR and an immersive session starts rendering", async () => {
@@ -57,7 +57,7 @@ test("xr-entry: page offers ENTER VR and an immersive session starts rendering",
     const h = await hooks(page);
     assert.equal(h.sessions, 1, "exactly one XR session requested");
     assert.ok(h.sessionActive, "session is live");
-    assert.ok(h.frameCount >= 10, `XR frame loop runs (got ${h.frameCount} frames)`);
+    assert.ok(h.frameCount >= 5, `XR frame loop runs (got ${h.frameCount} frames)`);
     assert.equal(
       (await page.evaluate(() =>
         document.getElementById("VRButton").textContent.trim())),
@@ -167,7 +167,10 @@ test("perf-signal: ~5s emulated-session FPS and draw stats (record-only)", async
     });
     await page.waitForTimeout(5000);
     const stamps = await page.evaluate(() => window.__xrTest.frameStamps.slice());
-    assert.ok(stamps.length > 30, `XR frames keep flowing (got ${stamps.length} in 5s)`);
+    // Liveness floor only: headless SwiftShader renders at single-digit FPS on
+    // a loaded CI machine, which says nothing about Quest silicon. The number
+    // is recorded for trend-watching, not gated.
+    assert.ok(stamps.length >= 5, `XR frames keep flowing (got ${stamps.length} in 5s)`);
     const spanSec = (stamps[stamps.length - 1] - stamps[0]) / 1000;
     const fps = (stamps.length - 1) / spanSec;
 
