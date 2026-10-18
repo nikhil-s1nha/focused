@@ -6,11 +6,14 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { sanitizeSignal } from "./relay.mjs";
 import { sanitizeSpectate } from "./spectate.mjs";
+import { createSignalLink } from "./signal-link/receiver.mjs";
 const root = path.dirname(fileURLToPath(import.meta.url));
 export function createSceneServer({
   tls = null,
   publishToken = process.env.PUBLISH_TOKEN,
+  signalToken = process.env.SIGNAL_TOKEN,
 } = {}) {
+  const signalLink = createSignalLink({ signalToken });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 8192 });
   // Spectator relay: the headset page publishes pose/events/phase; TV pages replay them.
   const spectators = new WebSocketServer({ noServer: true, maxPayload: 2048 });
@@ -18,6 +21,7 @@ export function createSceneServer({
     lastPose = null;
   const handler = (req, res) => {
     const pathname = new URL(req.url, "http://local").pathname;
+    if (signalLink.handle(req, res, pathname)) return;
     if (pathname === "/api/signal") {
       if (req.method !== "POST") {
         res.writeHead(405, { Allow: "POST" }).end();
@@ -151,7 +155,8 @@ export function createSceneServer({
       sockets.emit("connection", ws, req);
     });
   });
-  return { server, sockets, spectators };
+  server.on("close", () => signalLink.close());
+  return { server, sockets, spectators, signalLink };
 }
 if (
   process.argv[1] &&

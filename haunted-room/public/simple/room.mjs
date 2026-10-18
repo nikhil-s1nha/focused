@@ -1,13 +1,15 @@
+import { fluorescentMultiplier } from "../lighting-patterns.mjs";
+import { loadRoomSurfaces } from "./surface-materials.mjs";
 // Simple horror room: a square plaster chamber, four walls, one door per wall,
 // one ceiling lamp. The player stands still at the origin looking toward -Z.
 //
 // Procedural only: geometry is built into a few merged BufferGeometries and
 // canvas textures are painted at runtime (skipped where no canvas exists).
-// Budget: ~15 draw calls, 2 real-time lights (ceiling point lamp + one spot
+// Budget: <60 draw calls, 2 real-time lights (ceiling point lamp + one spot
 // that is moved to whichever door is glowing). Everything else is emissive
-// or baked-look, so the room stays readable at low light.
+// or baked-look. Zero fixture power removes all room self-illumination.
 
-import { paintWall, paintCeiling, paintFloor, paintWood, paintSheet, paintWetPool, paintBeam, paintWeb } from "./decor.mjs";
+import { paintWall, paintCeiling, paintFloor, paintWood, paintSheet, paintWetPool, paintBeam, paintWeb, paintRelief } from "./decor.mjs";
 
 const HALF = 3.5; // room half-size (walls at +/-HALF)
 const CEIL = 2.8; // ceiling height
@@ -19,8 +21,8 @@ const FRAME_D = 0.05; // frame protrusion into the room
 const SLAB_T = 0.05; // door slab thickness
 const DOOR_TIME = 0.6; // seconds for a full open/close
 const DOOR_SWING = 1.45; // radians (~83 degrees) at fully open
-const LAMP_Y = 2.12; // bulb centre
-const LAMP_MAX = 30; // candela at full light level
+const LAMP_Y = 2.63; // bulb centre
+const LAMP_MAX = 48; // candela at full light level
 const HALL_MAX = 16; // spot intensity at full hall glow
 const FLICKER_DIP = 0.22; // seconds per stutter dip (slow, never a strobe)
 
@@ -216,43 +218,48 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
   const poolTex = keepTex(paint(THREE, opts, 256, 256, poolPainter, 808));
   const beamTex = keepTex(paint(THREE, opts, 64, 256, paintBeam, 909));
   const webTex = keepTex(paint(THREE, opts, 256, 256, paintWeb, 1001));
+  const contactTex = keepTex(paint(THREE, opts, 128, 128, (c,w,h) => {
+    const g=c.createRadialGradient(w/2,h/2,0,w/2,h/2,w/2);
+    g.addColorStop(0,"rgba(0,0,0,.8)");g.addColorStop(.45,"rgba(0,0,0,.58)");g.addColorStop(1,"rgba(0,0,0,0)");
+    c.fillStyle=g;c.fillRect(0,0,w,h);
+  },1104));
   const mat = (m) => (materials.push(m), m);
 
-  // Walls, floor and props carry their own map as emissive so the room stays
-  // readable at every light level; setLight() scales the emissive gain.
-  const lit = (map, extra = {}) => mat(new THREE.MeshStandardMaterial({ map, emissiveMap: map, emissive: 0xffffff, emissiveIntensity: 0.6, roughness: 0.95, metalness: 0, ...extra }));
-  const wallMat = lit(tealTex);
-  const wallRedMat = lit(redTex);
-  const ceilingMat = lit(ceilTex);
-  const floorMat = lit(floorTex, { roughness: 0.75 });
-  const furnMat = lit(woodTex, { color: 0x6e6054, roughness: 0.8 });
-  const sheetMat = lit(sheetTex, { color: 0x8a7a6c, roughness: 0.9 });
+  const relief = keepTex(paint(THREE, opts, 1280, 512, (c,w,h,r) => paintRelief(c,w,h,r), 1102));
+  const floorRelief = keepTex(paint(THREE, opts, 1024, 1024, (c,w,h,r) => paintRelief(c,w,h,r,"floor"), 1103));
+  // Height maps must be linear data, unlike the sRGB albedo maps.
+  for (const texture of [relief, floorRelief]) if (texture && THREE.NoColorSpace !== undefined) texture.colorSpace = THREE.NoColorSpace;
+  // Restrained fill preserves readability without flattening physically lit surfaces.
+  const lit = (map, extra = {}) => mat(new THREE.MeshStandardMaterial({ map, emissiveMap: map, emissive: 0xb3b7a2, emissiveIntensity: 0.1, roughness: 0.95, metalness: 0, ...extra }));
+  const wallMat = lit(tealTex, { bumpMap: relief, bumpScale: .016 });
+  const wallRedMat = lit(redTex, { bumpMap: relief, bumpScale: .016 });
+  const ceilingMat = lit(ceilTex, { bumpMap: relief, bumpScale: .008 });
+  const floorMat = lit(floorTex, { roughness: 0.67, bumpMap: floorRelief, bumpScale: .012 });
+  const furnMat = lit(woodTex, { color: 0x777c70, roughness: 0.83 });
+  const sheetMat = lit(sheetTex, { color: 0x9c9a86, roughness: 0.96 });
   const emissiveMats = [
-    [wallMat, 0.48, 0.3],
-    [wallRedMat, 0.48, 0.3],
-    [ceilingMat, 0.26, 0.14],
-    [floorMat, 0.42, 0.28],
-    [furnMat, 0.36, 0.2],
-    [sheetMat, 0.42, 0.2],
+    [wallMat, 0.13, 0.12], [wallRedMat, 0.13, 0.12],
+    [ceilingMat, 0.075, 0.055], [floorMat, 0.12, 0.095],
+    [furnMat, 0.11, 0.07], [sheetMat, 0.12, 0.08],
   ];
   const metalMat = mat(new THREE.MeshStandardMaterial({ color: 0x5a5e5a, emissive: 0x1c201e, roughness: 0.5, metalness: 0.5 }));
   const cableMat = mat(new THREE.MeshStandardMaterial({ color: 0x151515, emissive: 0x0a0a0a, roughness: 0.6 }));
-  const trimMat = mat(new THREE.MeshStandardMaterial({ color: 0x3a2e22, emissive: 0x1a130c, roughness: 0.7 }));
-  const doorMat = mat(new THREE.MeshStandardMaterial({ map: woodTex, color: 0xa08068, emissive: 0x20140c, roughness: 0.6 }));
-  const brassMat = mat(new THREE.MeshStandardMaterial({ color: 0x8a6a2e, metalness: 0.7, roughness: 0.35, emissive: 0x221300 }));
+  const trimMat = mat(new THREE.MeshStandardMaterial({ color: 0x41473d, emissive: 0x0d100c, roughness: 0.7 }));
+  const doorMat = mat(new THREE.MeshStandardMaterial({ map: woodTex, color: 0x777a68, emissive: 0x100f0a, roughness: 0.87 }));
+  const brassMat = mat(new THREE.MeshStandardMaterial({ color: 0x777a71, metalness: 0.7, roughness: 0.48, emissive: 0x0a0b08 }));
   const voidMat = mat(new THREE.MeshBasicMaterial({ color: 0x000000 }));
-  const shadeMat = mat(new THREE.MeshStandardMaterial({ color: 0x6a4a28, emissive: 0x3a2610, roughness: 0.9, side: THREE.DoubleSide }));
-  const lampShadeMat = mat(new THREE.MeshStandardMaterial({ color: 0x8a6a40, emissive: 0xc07830, emissiveIntensity: 0.5, roughness: 0.9, side: THREE.DoubleSide }));
-  const BULB_BASE = new THREE.Color(0xffe2a8);
+  const shadeMat = mat(new THREE.MeshStandardMaterial({ color: 0x343b33, emissive: 0x040604, roughness: 0.9, side: THREE.DoubleSide }));
+  const lampShadeMat = mat(new THREE.MeshStandardMaterial({ color: 0x464c40, emissive: 0x10140e, emissiveIntensity: 0.08, roughness: 0.9, side: THREE.DoubleSide }));
+  const BULB_BASE = new THREE.Color(0xe6ead9);
   const bulbMat = mat(new THREE.MeshBasicMaterial({ color: BULB_BASE.clone() }));
   const poolMat = mat(new THREE.MeshBasicMaterial({ map: poolTex, transparent: true, opacity: 0.2, depthWrite: false, color: 0xffc080 }));
   const wetMat = mat(
     new THREE.MeshStandardMaterial({
       map: wetTex,
       emissiveMap: wetTex,
-      emissive: 0x500606,
-      color: wetTex ? 0xffffff : 0x7a0a0a,
-      roughness: 0.12,
+      emissive: 0x070201,
+      color: wetTex ? 0xffffff : 0x35100b,
+      roughness: 0.28,
       metalness: 0.1,
       transparent: true,
       depthWrite: false,
@@ -261,10 +268,10 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
       polygonOffsetUnits: -2,
     }),
   );
-  const dropMat = mat(new THREE.MeshStandardMaterial({ color: 0x6a0808, emissive: 0x3a0404, roughness: 0.15 }));
-  const rippleMat = mat(new THREE.MeshBasicMaterial({ color: 0x9a1212, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+  const dropMat = mat(new THREE.MeshStandardMaterial({ color: 0x38110b, emissive: 0x060201, roughness: 0.15 }));
+  const rippleMat = mat(new THREE.MeshBasicMaterial({ color: 0x513329, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
   const webMat = mat(new THREE.MeshBasicMaterial({ map: webTex, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide, color: 0xc4ccc4 }));
-  const windowMat = mat(new THREE.MeshBasicMaterial({ color: 0xb4d0e2 }));
+  const windowMat = mat(new THREE.MeshBasicMaterial({ color: 0x34493d }));
   const beamMat = mat(
     new THREE.MeshBasicMaterial({ map: beamTex, transparent: true, opacity: 0.4, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, color: 0xffffff }),
   );
@@ -324,6 +331,9 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
       [wp(side, -DOOR_HALF, 0, -0.6), wp(side, DOOR_HALF, 0, -0.6), wp(side, DOOR_HALF, DOOR_H, -0.6), wp(side, -DOOR_HALF, DOOR_H, -0.6)],
       wn(side),
     );
+    sydBox(trimB,side,-DOOR_HALF-.07,-DOOR_HALF,0,DOOR_H+.07,-.35,.018);
+    sydBox(trimB,side,DOOR_HALF,DOOR_HALF+.07,0,DOOR_H+.07,-.35,.018);
+    sydBox(trimB,side,-DOOR_HALF,DOOR_HALF,DOOR_H,DOOR_H+.07,-.35,.018);
     sydBox(trimB, side, -HALF, -DOOR_HALF - JAMB, 0, 0.12, 0, 0.025);
     sydBox(trimB, side, DOOR_HALF + JAMB, HALF, 0, 0.12, 0, 0.025);
     sydBox(trimB, side, -HALF, HALF, CEIL - 0.12, CEIL, 0, 0.08);
@@ -331,6 +341,21 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
     sydBox(trimB, side, DOOR_HALF, DOOR_HALF + JAMB, 0, DOOR_H + JAMB, 0, FRAME_D);
     sydBox(trimB, side, -DOOR_HALF - JAMB, DOOR_HALF + JAMB, DOOR_H, DOOR_H + JAMB, 0, FRAME_D);
   }
+
+  // Fixed industrial architecture: ceramic dado rails, conduit clips and
+  // ceiling grid. All pieces merge into existing trim/metal batches.
+  for (const side of SIDES) {
+    for (const [a,b] of [[-HALF,-.66],[.66,HALF]]) {
+      sydBox(trimB,side,a,b,1.17,1.20,0,.025);
+      sydBox(trimB,side,a,b,.05,.08,0,.035);
+    }
+    for (const x of [-3.2,-2.4,-1.6,1.6,2.4,3.2]) {
+      sydBox(trimB,side,x-.025,x+.025,2.57,2.67,.015,.07);
+    }
+    // Narrow reinforcement and kick plates remain part of each swinging slab.
+  }
+  for(const x of [-2.3,0,2.3]) trimB.box([x-.018,CEIL-.035,-HALF],[x+.018,CEIL,HALF]);
+  for(const z of [-2.3,0,2.3]) trimB.box([-HALF,CEIL-.035,z-.018],[HALF,CEIL,z+.018]);
 
   const floorB = makeBuilder(THREE);
   const ceilB = makeBuilder(THREE);
@@ -342,19 +367,15 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
   flatQuad(floorB, 0, 1);
   flatQuad(ceilB, CEIL, -1);
 
-  // Ceiling lamp.
+  // Ceiling-mounted fluorescent service fixture, opaque metal housing and
+  // a recessed diffuser. No oversized pendant cone or orange floor disk.
   const cordB = makeBuilder(THREE);
-  cordB.box([-0.008, CEIL - 0.36, -0.008], [0.008, CEIL, 0.008]);
+  cordB.box([-.68,CEIL-.13,-.15],[.68,CEIL-.015,.15]);
   const shadeB = makeBuilder(THREE);
-  shadeB.lathe([[0.11, CEIL - 0.34], [0.3, CEIL - 0.58]], 24, [0, 0, 0]);
+  shadeB.box([-.7,CEIL-.15,-.19],[.7,CEIL-.1,-.14]);
+  shadeB.box([-.7,CEIL-.15,.14],[.7,CEIL-.1,.19]);
   const bulbB = makeBuilder(THREE);
-  const BULB_R = 0.07;
-  const bulbProfile = [];
-  for (let i = 0; i <= 8; i++) {
-    const phi = (i / 8) * Math.PI;
-    bulbProfile.push([BULB_R * Math.sin(phi), LAMP_Y + BULB_R * Math.cos(phi)]);
-  }
-  bulbB.lathe(bulbProfile, 12, [0, 0, 0]);
+  bulbB.box([-.61,CEIL-.145,-.11],[.61,CEIL-.13,.11]);
   const poolB = makeBuilder(THREE);
   const POOL_R = 3.0;
   poolB.quad(
@@ -372,11 +393,13 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
     pivot.rotation.y = SIDE_ANGLE[side];
     const slabB = makeBuilder(THREE);
     slabB.box([0, 0, -SLAB_T / 2], [DOOR_W, DOOR_H, SLAB_T / 2]);
-    slabB.box([0.1, 1.2, SLAB_T / 2], [0.5, 1.9, SLAB_T / 2 + 0.01]);
-    slabB.box([0.6, 1.2, SLAB_T / 2], [1.0, 1.9, SLAB_T / 2 + 0.01]);
-    slabB.box([0.1, 0.15, SLAB_T / 2], [0.5, 1.0, SLAB_T / 2 + 0.01]);
-    slabB.box([0.6, 0.15, SLAB_T / 2], [1.0, 1.0, SLAB_T / 2 + 0.01]);
+
+
+
+
     const handleB = makeBuilder(THREE);
+    handleB.box([.055,.045,SLAB_T/2+.002],[DOOR_W-.055,.26,SLAB_T/2+.008]);
+    for(const y of [.34,1.76]) handleB.box([.025,y,SLAB_T/2],[.075,y+.09,SLAB_T/2+.012]);
     handleB.box([0.86, 0.95, SLAB_T / 2], [0.9, 1.0, SLAB_T / 2 + 0.025]);
     handleB.box([0.9, 0.97, SLAB_T / 2 + 0.025], [0.98, 0.98, SLAB_T / 2 + 0.06]);
     const slab = new THREE.Mesh(keepGeo(slabB.build()), doorMat);
@@ -406,24 +429,13 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
   tbox(furnB, T(-1.9, 0.03, -2.55).multiply(RYm(0.5)), [-0.25, 0, -0.9], [0.25, 0.03, 0.9]);
   // Jars and bottles left on the cabinet shelves.
   for (let i = 0; i < 5; i++) metalB.lathe([[0.04, 0], [0.045, 0.14], [0.02, 0.19], [0.02, 0.24]], 8, [-3.25 + i * 0.2, 1.53, -3.2]);
-  // Bed: head against the front wall at x ~2.2, frame and blood-soaked mattress.
-  furnB.box([1.62, 0.3, -3.48], [2.78, 1.2, -3.43]); // headboard
-  furnB.box([1.62, 0.3, -1.55], [2.78, 0.8, -1.5]); // footboard
-  furnB.box([1.62, 0.28, -3.43], [1.67, 0.4, -1.55]);
-  furnB.box([2.73, 0.28, -3.43], [2.78, 0.4, -1.55]);
-  for (const [x, z] of [[1.62, -3.48], [2.74, -3.48], [1.62, -1.55], [2.74, -1.55]]) furnB.box([x, 0, z], [x + 0.05, 0.3, z + 0.05]);
-  sheetB.box([1.67, 0.4, -3.42], [2.73, 0.62, -1.58]); // mattress
-  tbox(sheetB, T(2.0, 0.62, -3.15).multiply(RXm(-0.08)), [-0.2, 0, -0.17], [0.2, 0.1, 0.17]); // pillow
-  tbox(sheetB, T(2.45, 0.62, -3.1).multiply(RYm(0.2)), [-0.2, 0, -0.17], [0.2, 0.09, 0.17]);
-  sheetB.box([1.72, 0.62, -2.6], [2.68, 0.7, -1.62]); // crumpled blanket
-  tbox(sheetB, T(1.67, 0.55, -2.2).multiply(RZm(0.5)), [-0.34, -0.02, -0.5], [0, 0.02, 0.5]); // blanket sagging off the side
-  // Nightstand and its dented lamp.
-  furnB.box([2.86, 0, -3.46], [3.38, 0.62, -3.0]);
-  furnB.box([2.84, 0.62, -3.48], [3.4, 0.66, -2.98]);
-  lampB.lathe([[0.1, 0.0], [0.05, 0.04], [0.02, 0.3]], 10, [3.12, 0.66, -3.25]);
-  lampB.setMatrix(T(3.12, 0.66, -3.25).multiply(RZm(0.18)));
-  lampB.lathe([[0.1, 0.3], [0.19, 0.5]], 14, [0, 0, 0]);
-  lampB.setMatrix(null);
+  // Institutional waiting bench: restrained metal structure replaces the
+  // domestic wooden bed and lamps. No oversized primitive blood-soaked linens.
+  metalB.box([1.55,.43,-3.38],[2.97,.48,-2.93]);
+  metalB.box([1.55,.48,-3.43],[2.97,.91,-3.38]);
+  for(const x of [1.62,2.84])metalB.box([x,.01,-3.36],[x+.055,.43,-2.98]);
+  // One folded dust cloth, small enough to read as fabric rather than geometry.
+  sheetB.box([2.58,.48,-3.3],[2.91,.505,-3.01]);
   // Lab counter along the left wall with spilled drawers, bottles and a shelf.
   furnB.box([-3.45, 0, -2.8], [-2.9, 0.84, -0.9]);
   furnB.box([-3.48, 0.84, -2.84], [-2.82, 0.9, -0.86]);
@@ -453,6 +465,27 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
   }
   // Broken floor lamp, shade crushed, near the back corner.
   lampB.lathe([[0.1, 0], [0.04, 0.03], [0.02, 0.5]], 8, [1.2, 0.0, 1.8]);
+  // Abandoned observation station tucked behind the player; original props,
+  // with the four door lanes and central standing space deliberately clear.
+  furnB.box([-3.15,.77,2.35],[-1.05,.84,3.28]);
+  for(const x of [-3.08,-1.16]) metalB.box([x,0,2.45],[x+.055,.77,3.18]);
+  const consoleB = makeBuilder(THREE), screenB = makeBuilder(THREE);
+  for(const x of [-2.65,-1.65]) {
+    consoleB.box([x-.33,.84,2.72],[x+.33,1.36,3.14]);
+    consoleB.box([x-.12,.84,2.7],[x+.12,.9,3.16]);
+    screenB.box([x-.27,.91,2.711],[x+.27,1.29,2.719]);
+    // Vents and two rows of grubby hardware buttons share metal geometry.
+    for(let i=0;i<7;i++) metalB.box([x-.22+i*.065,1.32,2.708],[x-.20+i*.065,1.335,2.721]);
+  }
+  consoleB.box([-2.85,.84,2.4],[-1.35,.89,2.65]);
+  for(let row=0;row<3;row++)for(let col=0;col<16;col++) {
+    metalB.box([-2.77+col*.084,.889,2.43+row*.06],[-2.71+col*.084,.9,2.47+row*.06]);
+  }
+  // Wall-mounted ventilation grille and service pipe return. No new lights.
+  metalB.box([-3.47,1.78,1.45],[-3.4,2.27,2.27]);
+  for(let i=0;i<9;i++) consoleB.box([-3.395,1.82+i*.047,1.5],[-3.385,1.84+i*.047,2.22]);
+  for(const x of [1.3,1.45]) metalB.box([x,2.56,3.38],[x+.045,CEIL,3.44]);
+
   // Cables fixed along the ceiling edge, drooping at the ends.
   const cabB = makeBuilder(THREE);
   cabB.box([-3.4, 2.64, -3.46], [1.2, 2.66, -3.44]);
@@ -475,8 +508,8 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
   const winShape = new THREE.Shape();
   winShape.moveTo(-0.45, 1.35);
   winShape.lineTo(0.45, 1.35);
-  winShape.lineTo(0.45, 2.0);
-  winShape.absarc(0, 2.0, 0.45, 0, Math.PI, false);
+  winShape.lineTo(0.45, 2.25);
+  winShape.lineTo(-0.45, 2.25);
   winShape.lineTo(-0.45, 1.35);
   const winMesh = new THREE.Mesh(keepGeo(new THREE.ShapeGeometry(winShape, 10)), windowMat);
   winMesh.name = "window";
@@ -487,16 +520,19 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
   winB.box([3.44, 1.35, winZ - 0.02], [3.48, 2.4, winZ + 0.02]); // mullion
   winB.box([3.44, 1.35, winZ - 0.5], [3.48, 2.0, winZ - 0.46]);
   winB.box([3.44, 1.35, winZ + 0.46], [3.48, 2.0, winZ + 0.5]);
-  tbox(winB, T(3.42, 1.55, winZ).multiply(RXm(0.3)), [-0.02, -0.07, -0.62], [0.02, 0.07, 0.62]); // boards nailed across
-  tbox(winB, T(3.42, 1.85, winZ).multiply(RXm(-0.22)), [-0.02, -0.07, -0.6], [0.02, 0.07, 0.6]);
-  tbox(winB, T(3.42, 2.1, winZ + 0.1).multiply(RXm(0.12)), [-0.02, -0.06, -0.4], [0.02, 0.06, 0.4]);
   const beamB = makeBuilder(THREE);
   const bUv = [[0, 1], [1, 1], [1, 0], [0, 0]];
   beamB.quad([V(3.45, 2.35, winZ - 0.45), V(3.45, 2.35, winZ + 0.45), V(1.3, 0.02, winZ + 1.1), V(1.3, 0.02, winZ - 1.1)], V(-0.76, 0.65, 0), bUv);
   beamB.quad([V(3.45, 1.9, winZ - 0.4), V(3.45, 1.9, winZ + 0.4), V(2.2, 0.02, winZ + 0.8), V(2.2, 0.02, winZ - 0.8)], V(-0.76, 0.65, 0), bUv);
-  // Wet blood decals (glossy fresh pools).
+  // Observation glazing recess and rubber-gasket crossbars.
+  winB.box([3.35,1.28,winZ-.54],[3.49,1.35,winZ+.54]);
+  winB.box([3.35,2.25,winZ-.54],[3.49,2.32,winZ+.54]);
+  winB.box([3.35,1.35,winZ-.54],[3.49,2.25,winZ-.46]);
+  winB.box([3.35,1.35,winZ+.46],[3.49,2.25,winZ+.54]);
+  // Wet blood decals disabled: photographic floor carries localized staining.
+
   const wetB = makeBuilder(THREE);
-  for (const [cx, cz, r] of [[1.15, -1.0, 0.8], [-1.2, -1.8, 0.4], [-0.3, 1.4, 0.5]]) {
+  for (const [cx, cz, r] of []) {
     wetB.quad([V(cx - r, 0.008, cz - r), V(cx - r, 0.008, cz + r), V(cx + r, 0.008, cz + r), V(cx + r, 0.008, cz - r)], V(0, 1, 0), [[0, 0], [0, 1], [1, 1], [1, 0]]);
   }
 
@@ -507,6 +543,16 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
     group.add(m);
     return m;
   };
+  // One merged contact-occlusion layer anchors heavy props to the floor.
+  // Transparent black, never additive; no shadowmap pass on standalone Quest.
+  const contactB=makeBuilder(THREE);
+  for(const [x,z,rx,rz] of [[-2.8,-3.15,.85,.6],[2.25,-3.15,1,.65],[-3.1,-1.8,.65,1.2],[2.86,-1.7,.75,1.35],[-2.1,2.8,1.4,.85],[-1.65,-2,.6,.65]]) {
+    contactB.quad([V(x-rx,.004,z-rz),V(x-rx,.004,z+rz),V(x+rx,.004,z+rz),V(x+rx,.004,z-rz)],V(0,1,0),[[0,0],[0,1],[1,1],[1,0]]);
+  }
+  addMesh(contactB,mat(new THREE.MeshBasicMaterial({ map:contactTex, color:0x000000, transparent:true, opacity:.85, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1 })),"prop-contact-occlusion");
+  addMesh(consoleB, cableMat, "observation-console");
+  const screenMat = mat(new THREE.MeshStandardMaterial({ color: 0x101b16, emissive: 0x193c2e, emissiveIntensity: .32, roughness: .32, metalness: .15 }));
+  addMesh(screenB, screenMat, "dead-observation-screens");
   addMesh(floorB, floorMat, "floor");
   addMesh(ceilB, ceilingMat, "ceiling");
   addMesh(wallB, wallMat, "walls");
@@ -516,7 +562,7 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
   addMesh(cordB, trimMat, "lamp-cord");
   addMesh(shadeB, shadeMat, "lamp-shade");
   addMesh(bulbB, bulbMat, "lamp-bulb");
-  addMesh(poolB, poolMat, "lamp-pool");
+
   addMesh(furnB, furnMat, "furniture");
   addMesh(sheetB, sheetMat, "bloody-linen");
   addMesh(metalB, metalMat, "metal-props");
@@ -524,7 +570,7 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
   addMesh(cabB, cableMat, "cables-static");
   addMesh(webB, webMat, "cobwebs");
   addMesh(winB, trimMat, "window-boards");
-  addMesh(beamB, beamMat, "window-beam");
+
   addMesh(wetB, wetMat, "wet-blood");
   group.add(winMesh);
 
@@ -552,7 +598,7 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
   // Ceiling lamp halo and the nightstand lamp's warm glow (additive sprites).
   let halo = null;
   let lampGlow = null;
-  if (poolTex) {
+  if (false && poolTex) {
     halo = new THREE.Sprite(mat(new THREE.SpriteMaterial({ map: poolTex, color: 0xffb860, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false })));
     halo.name = "lamp-halo";
     halo.position.set(0, LAMP_Y - 0.1, 0);
@@ -606,12 +652,12 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
   group.add(motes);
 
   // ----- lights: exactly two real-time lights -----
-  const lamp = new THREE.PointLight(0xffd9a0, 0, 0, 2);
+  const lamp = new THREE.PointLight(0xcbd5bc, 0, 7, 2);
   lamp.name = "ceiling-lamp";
   lamp.position.set(0, LAMP_Y, 0);
   group.add(lamp);
 
-  const hallSpot = new THREE.SpotLight(0xffb868, 0, 9, 0.5, 0.9, 2);
+  const hallSpot = new THREE.SpotLight(0x95adae, 0, 6, 0.36, 0.85, 2);
   hallSpot.name = "hall-glow";
   hallSpot.target.name = "hall-glow-target";
   hallSpot.position.copy(wp("front", 0, 2.0, -1.4));
@@ -626,28 +672,10 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
   let flickLeft = 0;
   let flickAmt = 0;
   let flickAge = 0;
-  let dipStart = -1;
-  let nextDip = 0;
-  let flickRng = rng(1);
+  let flickDuration = 0;
   let anim = 0;
-  const DIP_GAP = [0.5, 1.2];
-
   function flickerMultiplier() {
-    if (flickLeft <= 0) return 1;
-    const t = flickAge;
-    let m = 1 - flickAmt * 0.18 * (0.5 - 0.5 * Math.cos(2 * Math.PI * 0.7 * t));
-    if (dipStart >= 0) {
-      const u = (t - dipStart) / FLICKER_DIP;
-      if (u >= 1) {
-        dipStart = -1;
-        nextDip = t + DIP_GAP[0] + flickRng() * (DIP_GAP[1] - DIP_GAP[0]);
-      } else {
-        m *= 1 - flickAmt * 0.7 * Math.sin(Math.PI * u);
-      }
-    } else if (t >= nextDip) {
-      dipStart = t;
-    }
-    return m;
+    return fluorescentMultiplier(flickAge, flickDuration, flickAmt);
   }
 
   // ----- public API -----
@@ -673,9 +701,7 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
     flickLeft = s;
     flickAmt = clamp01(intensity);
     flickAge = 0;
-    dipStart = -1;
-    flickRng = rng(s * 1000 + 17);
-    nextDip = 0.5 + flickRng() * 0.5;
+    flickDuration = s;
   }
 
   function setHallLight(side, level) {
@@ -715,19 +741,27 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
     }
 
     const L = lightLevel;
-    lamp.intensity = LAMP_MAX * Math.pow(L, 1.1) * mult;
-    const fm = 0.85 + 0.15 * mult;
-    for (const [m, base, gain] of emissiveMats) m.emissiveIntensity = (base + gain * L) * fm;
-    bulbMat.color.copy(BULB_BASE).multiplyScalar((0.2 + 0.8 * L) * mult);
+    // At 0 power there is no emissive readability floor. All apparent light
+    // comes from the fixture and explicitly requested cold door spill.
+    const power = Math.pow(L, 1.8) * mult;
+    lamp.intensity = LAMP_MAX * power;
+    for (const m of materials) if (m.isMeshStandardMaterial) m.emissiveIntensity = power * .045;
+    bulbMat.color.copy(BULB_BASE).multiplyScalar(Math.pow(L, .85) * mult);
+    bulbMat.visible = L > 0;
+    windowMat.color.setHex(0x34493d).multiplyScalar(power * .15);
+    webMat.opacity = .06 * power;
+    motes.material.opacity = .18 * power;
+    group.userData.lightLevel = L;
+    group.userData.fixturePower = power;
     if (hallSpot.userData.base) {
       const hm = Number.isFinite(time) ? 0.85 + 0.15 * Math.sin(time * 2.1) * Math.sin(time * 0.37) : 1;
       hallSpot.intensity = hallSpot.userData.base * hm;
     }
     const breathe = Number.isFinite(time) ? 1 + 0.03 * Math.sin(time * 1.3) : 1;
-    poolMat.opacity = Math.min(1, (0.05 + 0.75 * L) * mult * breathe);
-    if (halo) halo.material.opacity = Math.min(1, (0.08 + 0.5 * L) * mult);
-    if (lampGlow) lampGlow.material.opacity = (0.4 + 0.15 * Math.sin(anim * 0.9)) * (0.6 + 0.4 * mult);
-    beamMat.opacity = 0.3 + 0.1 * Math.sin(anim * 0.35);
+    poolMat.opacity = Math.min(1, (0.025 + 0.22 * L) * mult * breathe);
+    if (halo) halo.material.opacity = Math.min(1, (0.025 + 0.14 * L) * mult);
+    if (lampGlow) lampGlow.material.opacity = (0.12 + 0.035 * Math.sin(anim * 0.9)) * (0.6 + 0.4 * mult);
+    beamMat.opacity = 0.10 + 0.025 * Math.sin(anim * 0.35);
 
     // Life: slow wire sway, dripping blood, drifting dust (all well under 3 Hz).
     for (const b of bundles) {
@@ -750,7 +784,7 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
         dropMesh.visible = false;
         const u = Math.min(1, landed / 0.9);
         ripple.scale.setScalar(0.03 + 0.22 * u);
-        rippleMat.opacity = 0.5 * (1 - u);
+        rippleMat.opacity = 0.18 * (1 - u) * power;
       } else dropMesh.visible = true;
     }
     if (ph < DROP.fallStart) dropMesh.visible = true;
@@ -775,6 +809,19 @@ export function createSimpleRoom(THREE, scene, opts = {}) {
     textures.length = 0;
     group.clear();
   }
+
+  loadRoomSurfaces(THREE, {
+    keepTexture: keepTex, alive: () => !disposed,
+    apply(photo) {
+      for(const m of [wallMat,wallRedMat]) {m.map=m.emissiveMap=photo.wall;m.color.setHex(0xffffff);m.bumpMap=photo.plasterBump;m.bumpScale=.025;m.needsUpdate=true;}
+      ceilingMat.map=ceilingMat.emissiveMap=photo.plaster;ceilingMat.bumpMap=photo.plasterBump;ceilingMat.needsUpdate=true;
+      floorMat.map=floorMat.emissiveMap=photo.floor;floorMat.bumpMap=null;floorMat.roughness=.78;floorMat.needsUpdate=true;
+      for(const m of [doorMat,furnMat,trimMat]){m.map=photo.steel;m.color.setHex(0x9b9e91);m.bumpMap=photo.steelBump;m.bumpScale=.01;m.metalness=.35;m.roughness=.78;m.needsUpdate=true;}
+      // Desaturated stained fabric, no repeated painted blood target patterns.
+      sheetMat.map=sheetMat.emissiveMap=photo.plaster;sheetMat.bumpMap=photo.plasterBump;sheetMat.color.setHex(0x939080);sheetMat.needsUpdate=true;
+      group.userData.photographicSurfacesReady=true;
+    },
+  });
 
   update(0, 0);
 

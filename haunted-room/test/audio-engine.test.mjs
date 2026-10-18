@@ -518,3 +518,13 @@ test("drone thickens: detuned saw layer rises with tension, silent when calm", a
   assert.equal(sawGain.gain.value, 0, "saws vanish in relief");
   engine.dispose();
 });
+
+test('optional boost scales gain and clamps at three', () => {
+ const engine=new AudioEngine();
+ engine.ctx={currentTime:0};
+ engine.graph={master:{gain:{value:0,setTargetAtTime(v){this.value=v;}}}};
+ engine.setVolume(1);engine.setBoost(3);
+ assert.ok(Math.abs(engine.graph.master.gain.value-1.2)<1e-9);
+ assert.equal(engine.setBoost(99),3);
+ engine.setBoost(1);assert.equal(engine.graph.master.gain.value,.4);
+});

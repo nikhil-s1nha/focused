@@ -6,7 +6,7 @@ const rgba = (c, a = 1) => `rgba(${Math.round(c[0])},${Math.round(c[1])},${Math.
 const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
 const TAU = Math.PI * 2;
 
-export const BLOOD = { fresh: [138, 10, 14], mid: [104, 7, 11], dark: [58, 4, 8], dried: [64, 18, 12] };
+export const BLOOD = { fresh: [77, 19, 16], mid: [57, 15, 12], dark: [29, 10, 8], dried: [49, 25, 15] };
 
 // Closed smooth path through points (midpoint quadratic smoothing).
 function smoothPath(ctx, pts) {
@@ -353,267 +353,81 @@ const PAL = {
  * variant: "teal" (sick green) or "red" (blood-washed).
  */
 export function paintWall(ctx, w, h, rnd, variant = "teal") {
-  const pal = PAL[variant];
-  const DADO = Math.round(h * 0.68); // top of wainscot
-  // --- base paint with mottled tone ---
-  ctx.fillStyle = rgba(pal.paint);
+  // Institutional plaster over old ceramic tile. The palette deliberately keeps
+  // blood local: darkness comes from damp, age and occlusion, not red paint.
+  const pal = { paint: [132, 129, 113], plaster: [101, 96, 79], brick: [79, 65, 51] };
+  const tileY = h * 0.57;
+  ctx.fillStyle = variant === "teal" ? "#838579" : "#858174";
   ctx.fillRect(0, 0, w, h);
-  for (let i = 0; i < 70; i++) {
-    const x = rnd() * w;
-    const y = rnd() * DADO;
-    const r = 120 + rnd() * 260;
+  for (let i = 0; i < 180; i++) {
+    const x = rnd() * w, y = rnd() * h, r = 20 + rnd() * 220;
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    const c = rnd() > 0.5 ? pal.paintDark : mix(pal.paint, [235, 235, 210], 0.35);
-    g.addColorStop(0, rgba(c, 0.22));
-    g.addColorStop(1, rgba(c, 0));
-    ctx.fillStyle = g;
-    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    g.addColorStop(0, rnd() > .55 ? "rgba(36,35,25,.19)" : "rgba(219,215,185,.10)");
+    g.addColorStop(1, "rgba(38,35,25,0)");
+    ctx.fillStyle = g; ctx.fillRect(x-r,y-r,r*2,r*2);
   }
-  // Faded wallpaper stripes.
-  for (let x = 0; x < w; x += 96) {
-    ctx.fillStyle = rgba(pal.paintDark, 0.16);
-    ctx.fillRect(x, 0, 36, DADO);
+  const tw = w / 28, th = h / 12;
+  ctx.fillStyle = "#33392f"; ctx.fillRect(0,tileY,w,h-tileY);
+  for(let row=0; row<6; row++) for(let col=0; col<28; col++) {
+    const x=col*tw, y=tileY+row*th, tone=(rnd()-.5)*18;
+    ctx.fillStyle=rgba([78+tone,85+tone,73+tone]);
+    ctx.fillRect(x+2,y+2,tw-4,th-4);
+    ctx.fillStyle="rgba(181,184,156,.11)"; ctx.fillRect(x+3,y+3,tw-6,2);
+    ctx.fillStyle="rgba(0,0,0,.23)"; ctx.fillRect(x+3,y+th-5,tw-5,3);
+    if(rnd()>.91) crack(ctx,rnd,x+tw*.5,y+8,th*.6,false,.8);
   }
-  for (let i = 0; i < 14000; i++) {
-    ctx.fillStyle = rnd() > 0.5 ? "rgba(235,235,200,0.05)" : "rgba(10,20,14,0.07)";
-    ctx.fillRect(rnd() * w, rnd() * DADO, 1 + rnd() * 3, 1 + rnd() * 3);
+  // Narrow faded service stripe, uneven paint, no wallpaper or bright red wall.
+  ctx.fillStyle="#5d6154";ctx.fillRect(0,tileY-15,w,12);
+  ctx.fillStyle="rgba(0,0,0,.25)";ctx.fillRect(0,tileY-3,w,5);
+  for(let i=0;i<24;i++) {
+    const x=rnd()*w, len=80+rnd()*450, wd=6+rnd()*32;
+    const g=ctx.createLinearGradient(x,0,x,len);
+    g.addColorStop(0,"rgba(43,37,23,.42)");g.addColorStop(1,"rgba(43,37,23,0)");
+    ctx.fillStyle=g;ctx.fillRect(x,0,wd,len);
+    ctx.strokeStyle="rgba(45,39,26,.22)";ctx.lineWidth=.8;
+    ctx.beginPath();ctx.moveTo(x+wd*.5,0);ctx.lineTo(x+wd*.3,len);ctx.stroke();
   }
-  // --- water damage: tide stains running from the ceiling ---
-  for (let i = 0; i < 16; i++) {
-    const x = rnd() * w;
-    const len = 160 + rnd() * 420;
-    const wd = 24 + rnd() * 90;
-    const g = ctx.createLinearGradient(0, 0, 0, len);
-    g.addColorStop(0, "rgba(70,50,20,0.34)");
-    g.addColorStop(0.8, "rgba(70,50,20,0.16)");
-    g.addColorStop(1, "rgba(60,44,20,0)");
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.moveTo(x - wd, 0);
-    ctx.quadraticCurveTo(x - wd * 0.4, len * 0.6, x - wd * 0.1, len);
-    ctx.lineTo(x + wd * 0.1, len);
-    ctx.quadraticCurveTo(x + wd * 0.5, len * 0.6, x + wd, 0);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(40,28,10,0.25)"; // tide line
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(x - wd * 0.1, len);
-    ctx.lineTo(x + wd * 0.1, len);
-    ctx.stroke();
+  for(let i=0;i<45;i++) {
+    const x=rnd()*w, y=rnd()*.8*tileY;
+    peelPatch(ctx,rnd,x,y,8+rnd()*25,12+rnd()*48,pal,false);
   }
-  // --- peeling: heavier at the ceiling line and around the edges ---
-  const peelN = variant === "teal" ? 90 : 60;
-  for (let i = 0; i < peelN; i++) {
-    const edge = rnd();
-    let cx = rnd() * w;
-    if (edge < 0.35) cx = rnd() < 0.5 ? rnd() * w * 0.16 : w - rnd() * w * 0.16;
-    const cy = rnd() < 0.5 ? rnd() * h * 0.28 : rnd() * (DADO - 60);
-    const rx = 16 + rnd() * rnd() * 80;
-    const ry = rx * (1.0 + rnd() * 1.6);
-    peelPatch(ctx, rnd, cx, Math.min(cy, DADO - ry * 0.6), rx, ry, pal, rnd() > 0.55);
+  crack(ctx,rnd,w*.14,0,400); crack(ctx,rnd,w*.82,40,330);
+  mould(ctx,rnd,25,80,110);mould(ctx,rnd,w-40,80,130);
+  // Human-sized hand streaks and a single impact area. Other surfaces stay quiet.
+  const bloodX=variant==="teal"?w*.73:w*.24;
+  splatterField(ctx,rnd,bloodX,h*.44,100,90,.38,110);
+  handprint(ctx,rnd,bloodX+100,h*.51,.78,-.16,.72);
+  dragMark(ctx,rnd,bloodX+85,h*.54,bloodX+140,h*.77,11);
+  for(let i=0;i<14;i++) drip(ctx,rnd,bloodX+(rnd()-.5)*150,h*.44+rnd()*70,30+rnd()*140,.5+rnd(),.55);
+  // Unlit maintenance placard, screws and a faded inventory stencil.
+  ctx.fillStyle="#32362f";ctx.fillRect(w*.36,h*.23,225,100);
+  ctx.strokeStyle="#686c5d";ctx.lineWidth=3;ctx.strokeRect(w*.36+3,h*.23+3,219,94);
+  ctx.fillStyle="#a4a28d";ctx.font="18px monospace";ctx.fillText("SERVICE / 04",w*.36+20,h*.23+37);
+  ctx.font="12px monospace";ctx.fillText("KEEP DOORS CLOSED",w*.36+20,h*.23+64);
+  for(const dx of [8,216])for(const dy of [8,91]) {ctx.fillStyle="#888877";ctx.fillRect(w*.36+dx,h*.23+dy,3,3);}
+  // Fine aggregate and deeply dirty perimeter sell scale without extra geometry.
+  for(let i=0;i<38000;i++) {
+    ctx.fillStyle=rnd()>.5?"rgba(0,0,0,.10)":"rgba(223,219,196,.07)";
+    ctx.fillRect(rnd()*w,rnd()*h,.5+rnd()*1.7,.5+rnd()*1.7);
   }
-  // --- cracks ---
-  crack(ctx, rnd, w * 0.58, 20, 520);
-  crack(ctx, rnd, w * 0.12, 160, 380);
-  crack(ctx, rnd, w * 0.9, 90, 300);
-  crack(ctx, rnd, w * 0.34, 330, 240, true, 1.6);
-  // --- mould ---
-  mould(ctx, rnd, w * 0.03, h * 0.12, 170);
-  mould(ctx, rnd, w * 0.97, h * 0.1, 190);
-  mould(ctx, rnd, w * 0.22, DADO - 20, 190, [22, 30, 14]);
-  mould(ctx, rnd, w * 0.72, DADO - 10, 200, [22, 30, 14]);
-  mould(ctx, rnd, w * 0.5, 30, 210);
+  const shade=(x0,y0,x1,y1,alpha)=>{const g=ctx.createLinearGradient(x0,y0,x1,y1);g.addColorStop(0,`rgba(5,7,4,${alpha})`);g.addColorStop(1,"rgba(5,7,4,0)");ctx.fillStyle=g;ctx.fillRect(0,0,w,h);};
+  shade(0,0,0,h*.24,.7);shade(0,h,0,h*.77,.7);
+  shade(0,0,w*.12,0,.58);shade(w,0,w*.88,0,.58);
+}
 
-  // --- wainscot: warped wooden panelling, filthy and splintered ---
-  const dadoTop = DADO;
-  ctx.fillStyle = rgba(pal.dado);
-  ctx.fillRect(0, dadoTop, w, h - dadoTop);
-  for (let x = 0; x < w; x += 118) {
-    const v = (rnd() - 0.5) * 22;
-    ctx.fillStyle = rgba(mix(pal.dado, v > 0 ? [180, 170, 130] : [0, 0, 0], Math.abs(v) / 90), 0.9);
-    ctx.fillRect(x + 4, dadoTop + 18, 110, h - dadoTop - 70);
-    ctx.fillStyle = "rgba(0,0,0,0.5)";
-    ctx.fillRect(x, dadoTop + 14, 5, h - dadoTop - 40);
-    ctx.fillStyle = "rgba(230,220,180,0.1)";
-    ctx.fillRect(x + 5, dadoTop + 18, 3, h - dadoTop - 70);
-    for (let k = 0; k < 6; k++) {
-      ctx.strokeStyle = `rgba(10,8,4,${(0.15 + rnd() * 0.25).toFixed(2)})`;
-      ctx.lineWidth = 1 + rnd() * 1.5;
-      const gx = x + 10 + rnd() * 96;
-      ctx.beginPath();
-      ctx.moveTo(gx, dadoTop + 22);
-      ctx.bezierCurveTo(gx + 6, dadoTop + 100, gx - 6, dadoTop + 200, gx + 2, h - 56);
-      ctx.stroke();
-    }
+// Linear height data, independent of albedo: no painted blood/text becomes raised.
+export function paintRelief(ctx,w,h,rnd,kind="wall") {
+  ctx.fillStyle="#8c8c8c";ctx.fillRect(0,0,w,h);
+  for(let i=0;i<26000;i++) {
+    const v=110+Math.floor(rnd()*65);ctx.fillStyle=`rgb(${v},${v},${v})`;
+    ctx.fillRect(rnd()*w,rnd()*h,1+rnd()*2,1+rnd()*2);
   }
-  ctx.fillStyle = rgba(mix(pal.dado, [210, 200, 160], 0.35)); // chair rail
-  ctx.fillRect(0, dadoTop, w, 20);
-  ctx.fillStyle = "rgba(0,0,0,0.55)";
-  ctx.fillRect(0, dadoTop + 20, w, 8);
-  ctx.fillStyle = "rgba(0,0,0,0.5)"; // skirting
-  ctx.fillRect(0, h - 44, w, 44);
-  // Dado rot and peeled veneer.
-  for (let i = 0; i < 18; i++) {
-    peelPatch(ctx, rnd, rnd() * w, dadoTop + 60 + rnd() * (h - dadoTop - 130), 30 + rnd() * 70, 24 + rnd() * 50, { ...pal, plaster: [88, 66, 44] }, false);
-  }
-  const grime = ctx.createLinearGradient(0, dadoTop - 160, 0, h);
-  grime.addColorStop(0, "rgba(20,20,10,0)");
-  grime.addColorStop(1, "rgba(14,12,6,0.55)");
-  ctx.fillStyle = grime;
-  ctx.fillRect(0, dadoTop - 160, w, h - dadoTop + 160);
-
-  // --- gore ---
-  const gore = (fn) => fn();
-  if (variant === "teal") {
-    // Defaced mirror, left of the warning text.
-    const mx = 250;
-    const my = 120;
-    frame(ctx, mx, my, 230, 330, [70, 50, 28], 22);
-    const gl = ctx.createLinearGradient(mx, my, mx + 230, my + 330);
-    gl.addColorStop(0, "rgb(70,92,92)");
-    gl.addColorStop(0.5, "rgb(34,48,50)");
-    gl.addColorStop(1, "rgb(52,70,70)");
-    ctx.fillStyle = gl;
-    ctx.fillRect(mx + 20, my + 20, 190, 290);
-    ctx.strokeStyle = "rgba(235,245,240,0.8)";
-    ctx.lineWidth = 2;
-    for (let k = 0; k < 14; k++) {
-      const a = (k / 14) * TAU + rnd() * 0.3;
-      ctx.beginPath();
-      ctx.moveTo(mx + 130, my + 150);
-      ctx.lineTo(mx + 130 + Math.cos(a) * (50 + rnd() * 110), my + 150 + Math.sin(a) * (60 + rnd() * 140));
-      ctx.stroke();
-    }
-    ctx.fillStyle = "rgba(235,245,240,0.12)";
-    ctx.fillRect(mx + 20, my + 20, 60, 290);
-    splatterField(ctx, rnd, mx + 110, my + 120, 120, 100, 0.5, 260);
-    // Framed picture soaked in blood, above the bed head.
-    const px = 1950;
-    const py = 230;
-    frame(ctx, px, py, 290, 380, [86, 62, 36], 22);
-    ctx.fillStyle = "rgb(168,152,112)";
-    ctx.fillRect(px + 24, py + 24, 242, 332);
-    ctx.fillStyle = "rgba(60,50,30,0.55)"; // faded portrait silhouette
-    ctx.beginPath();
-    ctx.ellipse(px + 145, py + 140, 54, 66, 0, 0, TAU);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(px + 145, py + 300, 100, 80, 0, Math.PI, 0);
-    ctx.fill();
-    splatterField(ctx, rnd, px + 150, py + 150, 190, 170, 1.6, 520);
-    for (let i = 0; i < 12; i++) drip(ctx, rnd, px + 30 + rnd() * 230, py + 320, 60 + rnd() * 420, 2 + rnd() * 3.6, 0.9);
-    // Big soaked field climbing from the skirting on the left.
-    splatterField(ctx, rnd, 760, 250, 300, 150, 1.0, 300);
-    // Warning, in blood.
-    ctx.save();
-    ctx.font = "bold 92px 'Courier New', monospace";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "alphabetic";
-    const writeLine = (txt, x0, y0, rot) => {
-      ctx.save();
-      ctx.translate(x0, y0);
-      ctx.rotate(rot);
-      let cx = 0;
-      for (const ch of txt) {
-        const cw = ctx.measureText(ch).width;
-        ctx.save();
-        ctx.translate(cx, (rnd() - 0.5) * 8);
-        ctx.rotate((rnd() - 0.5) * 0.1);
-        ctx.fillStyle = "rgba(20,0,0,0.5)";
-        ctx.fillText(ch, 3, 3);
-        ctx.fillStyle = rgba(BLOOD.fresh, 0.96);
-        ctx.fillText(ch, 0, 0);
-        ctx.fillStyle = "rgba(255,160,150,0.22)";
-        ctx.fillRect(cw * 0.15, -70, 4, 56);
-        ctx.restore();
-        if (ch !== " ") drip(ctx, rnd, cx + cw * (0.25 + rnd() * 0.5), 8, 20 + rnd() * rnd() * 190, 2.4 + rnd() * 2, 0.95);
-        cx += cw;
-      }
-      ctx.restore();
-    };
-    writeLine("WATCH", 590, 610, -0.02);
-    writeLine("THE DOORS", 470, 730, 0.015);
-    ctx.restore();
-    handprint(ctx, rnd, 1620, 560, 1.7, 0.2);
-    handprint(ctx, rnd, 1700, 690, 1.55, -0.15);
-    handprint(ctx, rnd, 2380, 520, 1.6, 0.25);
-    dragMark(ctx, rnd, 1560, 220, 1640, 760, 28);
-    clawGouges(ctx, rnd, 2300, 130, 280, 4, pal.plaster);
-    clawGouges(ctx, rnd, 90, 430, 240, 3, pal.plaster);
-    gore(() => splatterField(ctx, rnd, 2380, 380, 140, 160, 0.9, 400));
-  } else {
-    // Red-washed wall: deep wash, huge fields, smears and gouges.
-    const wash = ctx.createLinearGradient(0, 0, 0, h);
-    wash.addColorStop(0, "rgba(120,12,14,0.45)");
-    wash.addColorStop(1, "rgba(80,6,10,0.3)");
-    ctx.fillStyle = wash;
-    ctx.fillRect(0, 0, w, h);
-    splatterField(ctx, rnd, 520, 400, 460, 280, 2.0, 560);
-    splatterField(ctx, rnd, 1900, 330, 430, 250, 1.8, 600);
-    splatterField(ctx, rnd, 2350, 560, 200, 200, 1.0, 360);
-    splatterField(ctx, rnd, 120, 180, 150, 140, 0.8, 300);
-    for (let i = 0; i < 40; i++) drip(ctx, rnd, rnd() * w, rnd() * h * 0.3, 80 + Math.pow(rnd(), 1.5) * 560, 1.5 + rnd() * 3.5, 0.7);
-    dragMark(ctx, rnd, 780, 160, 880, 800, 34);
-    dragMark(ctx, rnd, 1700, 140, 1560, 740, 30);
-    handprint(ctx, rnd, 1000, 420, 1.8, -0.1);
-    handprint(ctx, rnd, 1090, 560, 1.7, 0.2);
-    handprint(ctx, rnd, 1650, 600, 1.7, -0.3);
-    handprint(ctx, rnd, 360, 640, 1.6, 0.1);
-    clawGouges(ctx, rnd, 1180, 160, 340, 5, pal.plaster);
-    clawGouges(ctx, rnd, 2120, 140, 300, 4, pal.plaster);
-    clawGouges(ctx, rnd, 640, 130, 260, 3, pal.plaster);
-    // Scrawl.
-    ctx.save();
-    ctx.font = "bold 96px 'Courier New', monospace";
-    ctx.fillStyle = rgba([170, 14, 18], 1);
-    ctx.textAlign = "center";
-    ctx.translate(2030, 640);
-    ctx.rotate(0.04);
-    ctx.fillText("IT SEES YOU", 0, 0);
-    for (let i = 0; i < 11; i++) drip(ctx, rnd, -300 + i * 56 + rnd() * 20, 8, 14 + rnd() * 150, 2.3, 0.95);
-    ctx.restore();
-  }
-  // Floor-level blood creeping up the dado.
-  for (let i = 0; i < 4; i++) {
-    const x = rnd() * w;
-    const g = ctx.createRadialGradient(x, h, 0, x, h, 220);
-    g.addColorStop(0, "rgba(90,6,10,0.7)");
-    g.addColorStop(1, "rgba(90,6,10,0)");
-    ctx.fillStyle = g;
-    ctx.fillRect(x - 220, h - 220, 440, 220);
-  }
-  // Grime over everything: soot blotches and fine dirt so nothing reads as flat vector art.
-  for (let i = 0; i < 60; i++) {
-    const x = rnd() * w;
-    const y = rnd() * h;
-    const r = 60 + rnd() * 220;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    g.addColorStop(0, `rgba(10,8,4,${(0.12 + rnd() * 0.2).toFixed(2)})`);
-    g.addColorStop(1, "rgba(10,8,4,0)");
-    ctx.fillStyle = g;
-    ctx.fillRect(x - r, y - r, r * 2, r * 2);
-  }
-  for (let i = 0; i < 26000; i++) {
-    ctx.fillStyle = rnd() > 0.5 ? "rgba(0,0,0,0.09)" : "rgba(220,220,190,0.04)";
-    ctx.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 2.5, 1 + rnd() * 2.5);
-  }
-  const top = ctx.createLinearGradient(0, 0, 0, h * 0.4);
-  top.addColorStop(0, "rgba(0,0,0,0.5)");
-  top.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = top;
-  ctx.fillRect(0, 0, w, h * 0.4);
-  // Gentle vignette only: edges and ceiling line dim, the wall middle stays readable.
-  const edge = (x0, y0, x1, y1, a) => {
-    const g = ctx.createLinearGradient(x0, y0, x1, y1);
-    g.addColorStop(0, `rgba(0,0,0,${a})`);
-    g.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-  };
-  edge(0, 0, w * 0.1, 0, 0.7);
-  edge(w, 0, w * 0.9, 0, 0.7);
-  edge(0, 0, 0, h * 0.22, 0.55);
-  edge(0, h, 0, h * 0.88, 0.45);
+  const n=kind==="floor"?14:28;
+  const sy=kind==="floor"?0:h*.57;
+  const dy=kind==="floor"?h/14:h/12;
+  ctx.fillStyle="#484848";
+  for(let x=0;x<=w;x+=w/n)ctx.fillRect(x,sy,1.8,h-sy);
+  for(let y=sy;y<=h;y+=dy)ctx.fillRect(0,y,w,1.8);
 }
 
 export function paintCeiling(ctx, w, h, rnd) {
@@ -714,45 +528,6 @@ export function paintFloor(ctx, w, h, rnd) {
     g.addColorStop(1, "rgba(30,24,14,0)");
     ctx.fillStyle = g;
     ctx.fillRect(x - r, y - r, r * 2, r * 2);
-  }
-  // Faded rug in front of the player (world x -1.45..1.45, z 0.9..-1.7).
-  const rx0 = 300;
-  const ry0 = 400;
-  const rw = 424;
-  const rh = 380;
-  ctx.fillStyle = "rgba(0,0,0,0.5)";
-  ctx.fillRect(rx0 + 5, ry0 + 6, rw, rh);
-  ctx.fillStyle = "rgb(104,80,60)";
-  ctx.fillRect(rx0, ry0, rw, rh);
-  ctx.strokeStyle = "rgb(150,130,92)";
-  ctx.lineWidth = 6;
-  ctx.strokeRect(rx0 + 14, ry0 + 14, rw - 28, rh - 28);
-  ctx.strokeStyle = "rgb(60,86,72)";
-  ctx.lineWidth = 14;
-  ctx.strokeRect(rx0 + 34, ry0 + 34, rw - 68, rh - 68);
-  ctx.fillStyle = "rgb(74,100,86)";
-  ctx.beginPath();
-  ctx.moveTo(rx0 + rw / 2, ry0 + 56);
-  ctx.lineTo(rx0 + rw - 70, ry0 + rh / 2);
-  ctx.lineTo(rx0 + rw / 2, ry0 + rh - 56);
-  ctx.lineTo(rx0 + 70, ry0 + rh / 2);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = "rgba(180,150,100,0.6)";
-  ctx.lineWidth = 3;
-  for (let i = 1; i < 5; i++) {
-    ctx.beginPath();
-    ctx.moveTo(rx0 + rw / 2, ry0 + 56 + i * 24);
-    ctx.lineTo(rx0 + rw - 70 - i * 32, ry0 + rh / 2);
-    ctx.lineTo(rx0 + rw / 2, ry0 + rh - 56 - i * 24);
-    ctx.lineTo(rx0 + 70 + i * 32, ry0 + rh / 2);
-    ctx.closePath();
-    ctx.stroke();
-  }
-  for (let i = 0; i < 140; i++) {
-    // worn threads / fringe wear
-    ctx.fillStyle = `rgba(30,22,14,${(0.08 + rnd() * 0.2).toFixed(2)})`;
-    ctx.fillRect(rx0 + rnd() * rw, ry0 + rnd() * rh, 2 + rnd() * 16, 2);
   }
   // Cracks across tiles.
   for (let i = 0; i < 16; i++) {
@@ -881,7 +656,7 @@ export function paintWetPool(ctx, w, h, rnd) {
     ctx.stroke();
   }
   // Wet highlights (fake gloss).
-  ctx.fillStyle = "rgba(255,170,160,0.35)";
+  ctx.fillStyle = "rgba(159,143,123,0.08)";
   for (let i = 0; i < 4; i++) {
     ctx.beginPath();
     ctx.ellipse(cx + (rnd() - 0.5) * w * 0.3, cy + (rnd() - 0.5) * w * 0.3, w * (0.05 + rnd() * 0.06), w * 0.012, rnd() * 2, 0, TAU);
@@ -946,7 +721,7 @@ export function paintSheet(ctx, w, h, rnd) {
   ctx.fillRect(0, 0, w, h);
   bloodDry(ctx, rnd, w * 0.5, h * 0.5, w * 0.22);
   splatterField(ctx, rnd, w * 0.5, h * 0.5, w * 0.4, h * 0.4, 0.6, 100);
-  ctx.fillStyle = "rgba(255,150,140,0.2)";
+  ctx.fillStyle = "rgba(150,132,111,0.05)";
   ctx.beginPath();
   ctx.ellipse(w * 0.45, h * 0.45, w * 0.1, w * 0.025, -0.3, 0, TAU);
   ctx.fill();

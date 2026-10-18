@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
+import { installSignalLink } from "./signal-link/adapter.mjs";
+import { mountSignalLinkPanel } from "./signal-link/panel.mjs";
 import { Director } from "./director.mjs";
 import { SignalClient } from "./signal-client.mjs";
 import { AudioEngine } from "./audio-engine.mjs";
@@ -991,7 +993,10 @@ function drawHud(s) {
   wrapText(ctx, hint, 36, 335, 950, 34);
   ctx.fillStyle = "#8fa08a";
   ctx.font = "24px sans-serif";
-  ctx.fillText(`Sound ${audioEnabled ? "ON" : "OFF"} - experimental response proxy`, 36, 470);
+  const linked=signalLink.snapshot();
+  ctx.font="21px monospace";
+  ctx.fillText(`OPERATOR LINK ${linked.connection}  RECV ${linked.received} / APPLY ${linked.applied}`,36,430);
+  ctx.fillText((linked.lastAction||"Manual marker controls").slice(0,65),36,466);
   hud.texture.needsUpdate = true;
 
   drawTarget(soundTarget, `SOUND: ${audioEnabled ? "ON" : "OFF"}`, audioEnabled);
@@ -1900,6 +1905,17 @@ $("testReset").onclick = resetAll;
 $("testClose").onclick = () => toggleTestPanel(false);
 if (new URLSearchParams(location.search).get("test") === "1") toggleTestPanel(true);
 
+// Same-origin operator markers call existing scene functions; continuous input is unchanged.
+function applyLinkedControl(action,c){
+ if(action==='ambient'){if(!audio.enabled)return {applied:false,reason:'Sound is off; opt in manually'};cue('knock',{position:{x:.95,z:-5},intensity:c.strength});return true;}
+ if(action==='light'){if(fnaf)fnafTensionUntil=performance.now()/1000+c.seconds;else lampStutter();return true;}
+ if(action==='environment'){if(fnaf?.mode==='fnaf1'){fnafWorld.handle({kind:'static'});return true;}if(!fnaf&&monitor.isActive()){camInterference();return true;}return {applied:false,reason:'Open cameras for the camera-static mapping'};}
+ if(action==='reaction'){if(fnaf)applyFnafFlow([{type:'lightsCut',seconds:c.seconds}]);else applyFlow([{type:'lightsCut',seconds:c.seconds}]);return true;}
+ return false;
+}
+const signalLink=installSignalLink({canApply:()=>fnaf?fnaf.phase==='running':director.phase==='running'&&!director.paused,actions:Object.fromEntries(['light','ambient','environment','reaction'].map(k=>[k,c=>applyLinkedControl(k,c)]))});
+const signalPanel=mountSignalLinkPanel({adapter:signalLink});
+
 // ---------- render loop ----------
 let lastTime = performance.now(),
   lastHud = 0,
@@ -2077,6 +2093,7 @@ window.__fnaf = {
   },
 };
 window.__quiet = {
+  signalLink,
   director,
   haunt,
   power,
@@ -2114,6 +2131,8 @@ window.addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 window.addEventListener("pagehide", () => {
+  signalPanel.dispose();
+  signalLink.dispose();
   client.dispose();
   audio.dispose();
   musicBox.dispose();

@@ -1,3 +1,4 @@
+import { fluorescentMultiplier } from "./lighting-patterns.mjs";
 // atmosphere.mjs — scene-space mood grading for the haunted room.
 //
 // WebXR constraint: NO post-processing, EffectComposer or render targets.
@@ -222,14 +223,6 @@ export function createAtmosphere(
   const flick = { remaining: 0, duration: 0, intensity: 0, pattern: "stutter" };
   let flickClock = 0; // advances only while a flicker runs
 
-  // Deterministic per-step pseudo-random (no Math.random): integer hash.
-  function hash01(n) {
-    let h = (n | 0) ^ 0x5bf03635;
-    h = Math.imul(h ^ (h >>> 13), 0x9e3779b1);
-    h ^= h >>> 15;
-    return (h >>> 0) / 4294967296;
-  }
-
   /**
    * Trigger a light sputter. intensity 0..1 is how deep the lamp drops,
    * duration in seconds. pattern: "stutter" (fluorescent on/off chatter) or
@@ -320,18 +313,7 @@ export function createAtmosphere(
     if (flick.remaining > 0) {
       flick.remaining = Math.max(0, flick.remaining - step);
       flickClock += step;
-      const p = clamp01(flickClock / flick.duration);
-      if (flick.pattern === "sag") {
-        // One smooth brown-out dip and recovery.
-        sputter = 1 - flick.intensity * Math.sin(Math.PI * p);
-      } else {
-        // Fluorescent chatter: deterministic on/off, decaying. Photosensitivity
-        // guard: 5 steps/s means at most ~2.5 on/off pairs per second (< 3 Hz),
-        // and the dip depth is capped so it never reads as a full strobe.
-        const slot = Math.floor(flickClock * 5);
-        const off = hash01(slot) < 0.55;
-        sputter = off ? 1 - Math.min(0.8, flick.intensity) * (1 - p * 0.6) : 1;
-      }
+      sputter = fluorescentMultiplier(flickClock, flick.duration, flick.intensity, flick.pattern);
     }
     // Blackout leaves ~2% lamp remnant so emissives/silhouettes still read.
     const lampMul = sputter * lerp(1, 0.02, blackLevel);

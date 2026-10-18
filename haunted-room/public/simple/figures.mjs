@@ -17,7 +17,7 @@ import {
   createCharacter, CHARACTER_IDS, JUMPSCARE_SECONDS, MAX_TRIANGLES, FACE_DISTANCE,
 } from "../fnaf/world/characters.mjs";
 
-export const FIGURE_IDS = Object.freeze([...CHARACTER_IDS, DOLL_ID]);
+export const FIGURE_IDS = Object.freeze([...CHARACTER_IDS, DOLL_ID, "momo", "pennywise"]);
 export const SIDES = Object.freeze(["front", "back", "left", "right"]);
 
 /** Doorway centres (the wall opening). */
@@ -48,7 +48,7 @@ export const MAX_VISIBLE = 3;
  * leaning head reaches this far further forward (measured at landing). The head,
  * not the root, must end FACE_DISTANCE from the eye, or the lunge lands inside the face.
  */
-const HEAD_REACH = Object.freeze({ bellwether: 0.39, lark: 0.49, ratchet: 0.56, maestro: 0.37, doll: 0.458 });
+const HEAD_REACH = Object.freeze({ bellwether: 0.39, lark: 0.49, ratchet: 0.56, maestro: 0.37, doll: 0.458, momo: .37, pennywise: .37 });
 /** Ids whose head is swapped for the sculpted lunge face (face-texture.mjs) during the close-up. */
 export const LUNGE_FACE_IDS = Object.freeze([DOLL_ID]);
 const FACE_SWAP_PROGRESS = 0.55; // lunge progress at which the close-up face replaces the head
@@ -158,6 +158,7 @@ export function createFigures(THREE, scene, opts = {}) {
     e.character.group.rotation.set(0, 0, 0);
     e.character.setBlackout(blackout);
     e.wrap.position.set(0, 0, 0);
+    e.approach = null;
     e.wrap.visible = false;
     e.stand = null;
     syncFace(e);
@@ -236,12 +237,20 @@ export function createFigures(THREE, scene, opts = {}) {
   }
 
   /** Lunge at the eye. Only the figure moves; the camera is never touched. */
+  function approach(side, { crawl = false, seconds = 3, distance = 1.4 } = {}) {
+    const e = bySide[side];
+    if (!e) return false;
+    e.approach = { crawl, seconds, distance, age: 0 };
+    return true;
+  }
+
   function lunge(side, seconds = JUMPSCARE_SECONDS, opts = {}) {
     if (!valid(side)) return false;
     const e = bySide[side];
     if (!e) return false;
     if (e.phase === "caught") return true;
-    const sec = clamp(Number(seconds) || JUMPSCARE_SECONDS, 0.15, 2);
+    const sec = clamp(Number(seconds) || JUMPSCARE_SECONDS, 0.10, 2);
+    e.approach = null;
     e.character.setPose("idle");          // release any previous latch
     e.character.group.position.set(0, 0, 0);
     // Aim the root so the head ends FACE_DISTANCE from the eye. The built-in lunge
@@ -251,6 +260,11 @@ export function createFigures(THREE, scene, opts = {}) {
     // front of the player and lunges from there, so the face always lands in view.
     // Only the figure moves; the camera is never touched.
     const vd = opts && opts.viewDir;
+    e.edgeEntry = null;
+    if (opts.entrySide && vd) {
+      const n = Math.hypot(vd.x, vd.z) || 1;
+      e.edgeEntry = { x: -vd.z / n * opts.entrySide, z: vd.x / n * opts.entrySide, age: 0 };
+    }
     if (vd && Number.isFinite(vd.x) && Number.isFinite(vd.z) && Math.hypot(vd.x, vd.z) > 1e-6) {
       const dist = Math.hypot(s.x, s.z);
       const n = Math.hypot(vd.x, vd.z);
@@ -358,8 +372,21 @@ export function createFigures(THREE, scene, opts = {}) {
         jx = Math.sin(time * 2.3 + e.seed) * amp;
         jz = Math.sin(time * 1.7 + e.seed * 2) * amp * 0.6;
       }
-      const off = e.retreatOff;
-      e.wrap.position.set(s.x + s.outX * off + jx, 0, s.z + s.outZ * off + jz);
+      let off = e.retreatOff, floorY = 0;
+      if (e.approach && waiting) {
+        e.approach.age += dt;
+        const p = Math.min(1,e.approach.age/e.approach.seconds);
+        off -= e.approach.distance * p * p;
+        floorY = e.approach.crawl ? -1.15 + .035*Math.sin(time*7) : 0;
+      }
+      let edgeX = 0, edgeZ = 0;
+      if (e.edgeEntry && (e.phase === "lunge" || e.phase === "latched" || e.phase === "caught")) {
+        e.edgeEntry.age += dt;
+        const remaining = 1 - smooth(Math.min(1, e.edgeEntry.age / e.seconds));
+        edgeX = e.edgeEntry.x * 1.2 * remaining;
+        edgeZ = e.edgeEntry.z * 1.2 * remaining;
+      }
+      e.wrap.position.set(s.x + s.outX * off + jx + edgeX, floorY, s.z + s.outZ * off + jz + edgeZ);
     }
   }
 
@@ -421,7 +448,7 @@ export function createFigures(THREE, scene, opts = {}) {
 
   return {
     group,
-    show, hold, retreat, lunge, caught, hide, clear,
+    show, hold, retreat, approach, lunge, caught, hide, clear,
     setBlackout, update, dispose,
     occupant, getFigure, getStats,
   };

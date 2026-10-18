@@ -40,6 +40,7 @@ export class AudioEngine {
     this.graph = null;
     this.enabled = false;
     this.volume = 0.7;
+    this.boost = 1;
     this.lastEncounter = null; // { id, t } of the encounter last seen in update()
     this.listener = { x: 0, z: 2 }; // player rig start; updated from camera
     this.duckedUntil = 0; // audio-clock time the current duck() releases at
@@ -68,10 +69,15 @@ export class AudioEngine {
       await this.ctx.suspend();
     return true;
   }
+  setBoost(value) {
+    this.boost = Number.isFinite(value) ? Math.max(1, Math.min(3, value)) : 1;
+    this.setVolume(this.volume);
+    return this.boost;
+  }
   setVolume(v) {
     this.volume = clamp01(v);
     if (this.ctx && this.graph)
-      setParam(this.ctx, this.graph.master.gain, this.volume * MASTER_CAP, 0.05);
+      setParam(this.ctx, this.graph.master.gain, this.volume * MASTER_CAP * this.boost, 0.05);
     return this.volume;
   }
   // Drives the layered drone from a Director snapshot and fires sparse one-shot
@@ -241,7 +247,7 @@ export class AudioEngine {
   #build() {
     const ctx = this.ctx;
     const master = ctx.createGain();
-    master.gain.value = this.volume * MASTER_CAP;
+    master.gain.value = this.volume * MASTER_CAP * this.boost;
     // Clipping safety: a limiter-tuned compressor sits after the master cap
     // when the context supports one (stingers hit hard but never clip).
     let limiter = null;

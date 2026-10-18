@@ -11,7 +11,9 @@
     "quest:record": "node scripts/quest.mjs --record",
     "quest:legacy": "sh scripts/quest-usb.sh",
     "test:xr": "node --test --test-concurrency=1 test-xr/*.test.mjs",
-    "test:xr:install": "playwright install chromium"
+    "test:xr:install": "playwright install chromium",
+    "start:signal": "node scripts/start-signal-link.mjs",
+    "quest:demo": "node scripts/quest.mjs --port 48080"
   },
   "dependencies": {
     "three": "0.186.1",

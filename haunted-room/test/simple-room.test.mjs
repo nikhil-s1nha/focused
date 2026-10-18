@@ -123,12 +123,18 @@ test("setLight clamps and drives the ceiling lamp monotonically", () => {
   room.dispose();
 });
 
-test("walls stay faintly readable at zero light (emissive floor)", () => {
+test("zero fixture power removes wall and prop self-illumination", () => {
   const room = createSimpleRoom(THREE, new THREE.Scene());
   room.setLight(0);
   room.update(0, 0);
   const walls = room.group.getObjectByName("walls");
-  assert.ok(walls.material.emissiveIntensity > 0);
+  assert.equal(walls.material.emissiveIntensity, 0);
+  room.group.traverse((o) => {
+    if(o.material?.isMeshStandardMaterial) assert.equal(o.material.emissiveIntensity,0,`${o.name} has no residual emission`);
+  });
+  assert.equal(room.group.getObjectByName("lamp-bulb").material.color.getHex(),0);
+  assert.equal(room.group.getObjectByName("window").material.color.getHex(),0);
+  assert.equal(room.group.getObjectByName("dust-motes").material.opacity,0);
   room.dispose();
 });
 
@@ -240,4 +246,18 @@ test("two rooms can coexist and dispose independently", () => {
   assert.equal(scene.children.length, 1);
   b.dispose();
   assert.equal(scene.children.length, 0);
+});
+
+ test("fixture power is pooled and nonlinear; cold hall spill stays explicitly controlled", () => {
+  const room=createSimpleRoom(THREE,new THREE.Scene());
+  const fixture=room.group.getObjectByName("ceiling-lamp");
+  const bulb=room.group.getObjectByName("lamp-bulb");
+  room.setLight(.1);room.update(0,0);const low=fixture.intensity;
+  assert.ok(low>0&&low<1);assert.ok(bulb.material.color.getHex()>0);
+  room.setLight(.45);room.update(0,0);assert.ok(fixture.intensity>low*8);
+  assert.equal(fixture.distance,7);
+  room.setLight(0);room.setHallLight("front",.25);room.update(0,0);
+  assert.equal(fixture.intensity,0);assert.ok(room.group.getObjectByName("hall-glow").intensity>0);
+  room.setHallLight("front",0);room.update(0,0);assert.equal(room.group.getObjectByName("hall-glow").intensity,0);
+  room.dispose();
 });

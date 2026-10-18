@@ -7,8 +7,8 @@
 import { BeatPlanner } from './beats.mjs';
 
 export const SIDES = Object.freeze(['left', 'right', 'front', 'back']);
-export const BASE_FIGURES = Object.freeze(['bellwether', 'lark', 'ratchet', 'maestro']);
-export const WITHERED_FIGURES = Object.freeze(BASE_FIGURES.map((id) => `withered-${id}`));
+export const BASE_FIGURES = Object.freeze(['bellwether', 'lark', 'ratchet', 'maestro', 'momo', 'pennywise']);
+export const WITHERED_FIGURES = Object.freeze(BASE_FIGURES.filter(id => id !== 'momo' && id !== 'pennywise').map((id) => `withered-${id}`));
 const STATES = Object.freeze(['BUILD', 'PEAK', 'RELIEF', 'WAIT']);
 
 export const TIMING = Object.freeze({
@@ -45,6 +45,7 @@ function sanitizeInput(input) {
 
 export class ScareDirector {
   #rng;
+  #variableTiming;
   #duration;
   #phase = 'idle'; // idle | running | ended
   #elapsed = 0;
@@ -65,7 +66,8 @@ export class ScareDirector {
   #endReason = null;
   #pending = []; // triggered scares waiting for the current one to finish
 
-  constructor({ rng = Math.random, durationSeconds = 120 } = {}) {
+  constructor({ rng = Math.random, durationSeconds = 120, variableTiming = false } = {}) {
+    this.#variableTiming = variableTiming;
     this.#rng = typeof rng === 'function' ? rng : Math.random;
     this.#planner = new BeatPlanner({ rng: () => this.#roll() });
     this.#duration = Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : 120;
@@ -262,10 +264,14 @@ export class ScareDirector {
     this.#cancelBeat();
     this.#planner.noteScare(this.#elapsed);
     const side = request.side ?? this.#chooseSide();
-    const silence = request.skipTelegraph ? 0.2 : TIMING.silence;
+    const silence = request.skipTelegraph ? 0.2 : this.#variableTiming ? this.#between([.25, .85]) : TIMING.silence;
     this.#scare = {
       side,
       stage: 'silence',
+      darkLead: !this.#variableTiming || this.#roll() < .3,
+      lights: this.#variableTiming ? this.#between([.15, .45]) : TIMING.lights,
+      approach: this.#variableTiming ? this.#between([.18, .38]) : TIMING.approach,
+      lunge: this.#variableTiming ? this.#between([.10, .16]) : TIMING.lunge,
       timer: silence,
       id: null,
       requestedId: request.id ?? null,
@@ -274,7 +280,7 @@ export class ScareDirector {
     };
     this.#gap = null;
     this.#scaresSoFar += 1;
-    this.#emit({ type: 'silence', side, seconds: silence });
+    if (!this.#variableTiming || this.#roll() < .45) this.#emit({ type: 'silence', side, seconds: silence });
   }
 
   #advanceStage() {
@@ -282,8 +288,8 @@ export class ScareDirector {
     switch (s.stage) {
       case 'silence':
         s.stage = 'lights';
-        s.timer = TIMING.lights;
-        this.#emit({ type: 'lights', level: 0.05, seconds: TIMING.lights });
+        s.timer = s.lights;
+        if (s.darkLead) this.#emit({ type: 'lights', level: 0.05, seconds: s.lights });
         return;
       case 'lights':
         this.#emit({ type: 'door', side: s.side, open: 1 });
@@ -318,7 +324,7 @@ export class ScareDirector {
       this.#emit({ type: 'hold', side: s.side });
     } else {
       s.state = 'approach';
-      s.timer = TIMING.approach;
+      s.timer = s.approach;
     }
   }
 
@@ -339,8 +345,8 @@ export class ScareDirector {
   #startLunge() {
     const s = this.#scare;
     s.stage = 'lunge';
-    s.timer = TIMING.lunge;
-    this.#emit({ type: 'lunge', side: s.side, id: s.id, seconds: TIMING.lunge });
+    s.timer = s.lunge;
+    this.#emit({ type: 'lunge', side: s.side, id: s.id, seconds: s.lunge });
   }
 
   #caught() {

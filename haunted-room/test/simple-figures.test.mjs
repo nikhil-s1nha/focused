@@ -255,3 +255,19 @@ test("doorway figures stay silhouettes and burst lit at under 3 Hz", () => {
   assert.ok(bursts >= 4 && bursts <= seconds, `bursts ${bursts}`);
   f.dispose();
 });
+
+test("ignored threat sweeps from the selected screen edge and lands close in view", () => {
+  const f=createFigures(THREE,new THREE.Scene());
+  for (const edge of [-1,1]) {
+    f.show("back","bellwether");
+    f.lunge("back",.13,{viewDir:{x:0,z:-1},entrySide:edge});
+    f.update(.02,0,{tension:1});
+    assert.ok(f.getFigure("back").headPosition.x*edge>.5,"enters from requested edge");
+    run(f,.4);
+    const end=f.getFigure("back");
+    assert.ok(Math.abs(end.headPosition.x)<.1,"lands in view");
+    assert.ok(Math.abs(end.faceDistanceToEye-FACE_DISTANCE)<.03,"close face distance preserved");
+    f.hide("back");
+  }
+  f.dispose();
+});

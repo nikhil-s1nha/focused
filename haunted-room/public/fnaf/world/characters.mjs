@@ -924,12 +924,46 @@ export function maestroSpec(K, v = {}) {
   };
 }
 
+// Distinct horror guests share the articulated rig, but have their own sculpted heads.
+function horrorGuestSpec(K, id) {
+  const clown = id === "pennywise";
+  const spec = maestroSpec(K, {id, noHat:true});
+  const head = new Part(K), jaw = new Part(K);
+  const skin = clown ? 0xe0d5bd : 0xa6a899;
+  head.sph("body",[.22,16,12],{p:[0,.21,0],s:[1.15,clown?1.35:1.1,.85],c:skin});
+  for(const side of [-1,1]) {
+    head.sph("body",[.105,12,8],{p:[side*.115,.24,.13],s:[1,1.12,.65],c:0x161210});
+    head.sph("body",[clown?.055:.085,12,8],{p:[side*.115,.24,.18],c:0xe4dfbd});
+    head.sph("eye",[.022,8,6],{p:[side*.115,.24,.235]});
+    head.box("body",[.13,.026,.035],{p:[side*.115,.34,.17],r:[0,0,side*.3],c:0x17100e});
+    if(clown) {
+      head.box("body",[.018,.24,.018],{p:[side*.12,.21,.215],r:[0,0,-side*.25],c:0x7c1712});
+      head.sph("body",[.14,10,8],{p:[side*.24,.29,-.04],s:[.8,1.3,1],c:0x8f3214});
+    } else {
+      for(let i=0;i<7;i++) head.cyl("body",[.014,.005,.55+i*.025,5],{p:[side*(.19+i*.009),.1,-.04+i*.012],r:[0,0,side*(.04+i*.035)],c:0x171813});
+    }
+    head.box("body",[.13,.018,.025],{p:[side*.12,.07,.18],r:[0,0,side*.32],c:0x641e18});
+  }
+  head.sph("body",[clown?.045:.035,10,8],{p:[0,.17,.205],s:[1,clown?1:1.7,1],c:clown?0x9f241c:skin});
+  head.sph("body",[.13,12,8],{p:[0,.045,.135],s:[1.35,.65,.4],c:0x170a09});
+  head.teeth(13,{x0:-.15,x1:.15,y:.065,z:.19,w:.018,h:.045,curve:1.5,c:0xcfc09b});
+  jaw.box("body",[.29,.06,.16],{p:[0,-.035,.08],c:skin});
+  jaw.teeth(12,{x0:-.14,x1:.14,y:0,z:.17,w:.018,h:.045,dir:1,curve:1.5,c:0xcfc09b});
+  if(clown) for(let i=0;i<12;i++) {
+    const a=i*Math.PI*2/12;
+    spec.body.sph("body",[.08,8,5],{p:[Math.cos(a)*.28,.84,Math.sin(a)*.23],s:[1,.5,1],c:0xc3b9a4});
+  }
+  spec.head={pos:[0,.92,.02],part:head}; spec.jaw={pos:[0,.02,.02],part:jaw};
+  spec.headScale=1.15; spec.eye={color:clown?0xffb64c:0xdce8c5,base:.1,glow:2.2};
+  return spec;
+}
+
 // ---------------------------------------------------------------------------
 // Public factories
 // ---------------------------------------------------------------------------
 
 export const CHARACTER_IDS = Object.freeze(["bellwether", "lark", "ratchet", "maestro"]);
-export const SPECS = { bellwether: bellwetherSpec, lark: larkSpec, ratchet: ratchetSpec, maestro: maestroSpec };
+export const SPECS = { bellwether: bellwetherSpec, lark: larkSpec, ratchet: ratchetSpec, maestro: maestroSpec, momo: K => horrorGuestSpec(K,"momo"), pennywise: K => horrorGuestSpec(K,"pennywise") };
 
 export function createCharacter(THREE, id, options = {}) {
   const make = SPECS[id];

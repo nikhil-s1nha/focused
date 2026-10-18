@@ -1,0 +1,59 @@
+QUEST HACKATHON DEMO — October 17, 2026
+
+Current server: http://127.0.0.1:48080/simple.html
+No EEG required. The normal two-minute round now uses the same randomized
+encounter and atmosphere functions on desktop and Quest. The optional
+?mode=adaptive URL retains the sensor-oriented pipeline for later work.
+
+RIGHT NOW
+The game server is running. The Quest launcher is running and waiting for USB.
+Plug in the Quest with a data-capable USB cable, wake it, and allow USB debugging
+if prompted. The launcher forwards port 48080 and opens Quest Browser.
+Select Enter VR. Point a controller at the large START NIGHT WATCH button and squeeze the index trigger. A/X toggles sound.
+Sound enables at Begin; 3x boost is default with the existing limiter preserved.
+The headset's own media volume remains under its hardware controls.
+
+AFTER A COMPUTER/TERMINAL RESTART
+cd /Users/NikhilSinha/Documents/Codex/2026-10-17/so-my/outputs/focused/haunted-room
+npm ci
+npm run quest:demo
+
+Requires Node >=20.19 and adb. The launcher starts the server if needed, waits
+for an authorized headset, opens the browser, and reapplies forwarding after
+USB reconnect. Keep the Mac awake and the cable connected.
+
+Fallback Quest URL: http://localhost:48080/simple.html?quest=1
+Do not use ?test=1 for the presentation: that enables manual debug shortcuts.
+Desktop rehearsal: http://127.0.0.1:48080/simple.html → Begin night watch.
+
+CONTROLS / FLOW
+- Aim at START / PLAY AGAIN and squeeze the index trigger. Pressing elsewhere does not start.
+- A (right) or X (left): sound toggle.
+- Grip: no forced jumpscare in normal mode.
+- Turn your head to look; no scripted camera turns.
+- Two-minute round, then trigger to replay. Desktop Try again starts a new round.
+- Exiting VR or losing headset visibility resets a running round and clears
+  scheduled scares. Start again on return; old attacks are not queued.
+- VR readout shows readiness/countdown, controls, and sound/boost state.
+
+CONTENT
+Random door selection, floor crawls, accelerating approaches, watchers,
+false retreats, rushes, Momo/clown-inspired procedural models, varied synthesized
+sound cues, side-entry lunges for ignored doors, independent dimming/flickers,
+empty blackouts and door feints. The procedural characters are not exact imported
+movie/meme assets. Five lives per round: a lunge from a door you are not watching costs one life.
+Watching the attacking door avoids damage; feints do not cost lives. Zero lives
+ends the round with GAME OVER. Lives remain visible on desktop and in the VR HUD.
+
+VERIFICATION
+Full Node suite: 462 tests, 461 pass, 1 skipped, zero failures.
+Normal desktop entry and game start checked in browser. Latest physical Quest
+rendering, controller behavior, comfort, stereo presentation, and performance
+still need a headset rehearsal. Do not describe these as physically verified.
+No live EEG or Roboflow is required or claimed for this demo.
+
+BEFORE GOING ON STAGE
+Run one complete round on the actual Quest, check audio starts, turn toward all
+four doors, let one ignored threat enter view, finish/replay, then unplug/replug
+USB and confirm the launcher restores the page. If frame rate is poor or the
+browser shows VR NOT SUPPORTED, resolve that on the device before presenting.

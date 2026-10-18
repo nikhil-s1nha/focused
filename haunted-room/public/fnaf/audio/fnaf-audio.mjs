@@ -17,7 +17,7 @@ export const SOUND_NAMES = Object.freeze({
     "callStart", "radioCrackle"],
   animatronic: ["footsteps", "ventCrawl", "ventBang", "pans", "laugh", "breathing",
     "maskBreath", "musicBoxTick", "powerOutJingle", "eyes", "jumpscare",
-    "victimSting", "gameOver", "murmur"],
+    "victimSting", "gameOver", "murmur", "scream"],
 });
 export const ALL_SOUNDS = Object.freeze([...SOUND_NAMES.office, ...SOUND_NAMES.animatronic]);
 const LOOPING = new Set(["fan", "lightBuzz", "cameraStatic", "maskBreath", "musicBoxTick"]);
@@ -332,6 +332,14 @@ export class FnafAudio {
         this.#osc("sine", 1680, null, t0, 1.8, g);
         this.#osc("sine", 1692, null, t0, 1.8, g);
         dur = 1.8; break;
+      }
+      case "scream": {
+        const g = ctx.createGain(); g.connect(c.gain);
+        this.#env(g.gain, L*.55, t0, .035, .45, .7);
+        const pitch = 420 + rng()*300;
+        for (const ratio of [1,1.027,2.04]) this.#osc("sawtooth",pitch*ratio,pitch*ratio*.42,t0,1.2,g);
+        this.#noiseSrc(t0,1.2,1600+rng()*1800,.65,"bandpass",g);
+        dur=1.25; break;
       }
       case "jumpscare": {
         // Dissonant cluster + noise, ~1 s, soft attack, capped well under MAX_LEVEL.

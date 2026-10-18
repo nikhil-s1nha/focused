@@ -365,3 +365,21 @@ test("hold stops automatic scares and beats but trigger still works", () => {
   assert.ok(events.some((e) => e.type === "lunge"), "a triggered scare still plays while held");
   dir.setHold(false);
 });
+
+test("variable timing changes warnings and lunges across seeds within bounded faster ranges", () => {
+  const warnings = new Set(), lunges = new Set(), doors = new Set();
+  let darkLeads=0, quietLeads=0;
+  for (let seed = 1; seed <= 30; seed++) {
+    const d = new ScareDirector({rng:rngFrom(seed), variableTiming:true});
+    d.start(); d.trigger();
+    let events = d.consumeEvents();
+    for (let i=0;i<180;i++) { d.update(1/60,{tension:1,state:"PEAK",observed:null}); events.push(...d.consumeEvents()); }
+    const warning=events.find(e=>e.type==='silence'&&e.side);
+    const lunge=events.find(e=>e.type==='lunge');
+    if (warning) { assert.ok(warning.seconds>=.25&&warning.seconds<=.85); warnings.add(warning.seconds); } else quietLeads++;
+    if(events.some(e=>e.type==='lights')) darkLeads++;
+    assert.ok(lunge.seconds>=.10&&lunge.seconds<=.16);
+    lunges.add(lunge.seconds); doors.add(lunge.side);
+  }
+  assert.ok(warnings.size>3); assert.ok(quietLeads>0); assert.ok(darkLeads>0&&darkLeads<30); assert.ok(lunges.size>20); assert.equal(doors.size,4);
+});
