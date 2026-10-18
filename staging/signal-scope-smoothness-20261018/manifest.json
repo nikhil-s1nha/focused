@@ -1,0 +1,14 @@
+{
+  "signal-viewer/bench-trace.js": {
+    "base_sha256": null,
+    "proposed_sha256": "aaf3c4e2dd7889ac816b83972617861a19fff015919ca29db32653a668c1b744"
+  },
+  "signal-viewer/app.js": {
+    "base_sha256": "0d3a585ffa3078ff5594b7f85a8084d99da796ce105b40718214fa2fd1ad25b3",
+    "proposed_sha256": "1cb7b5ed6bc00b179c11a33fc402752220313e7ca2b0ad9e3112322506bc78fa"
+  },
+  "signal-viewer/bench-panel.js": {
+    "base_sha256": "379cf1290d15b9575875833a267142ba20fc04fb08d8d3e8277151c187a76882",
+    "proposed_sha256": "ce864dcab8d46affd2ecba8da0b263acdf73e9a9d2eae5333932ddee73c87714"
+  }
+}

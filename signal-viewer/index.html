@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signal Scope · live electrical waveform</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main>
+  <header class="app-header">
+    <div class="brand"><span class="brand-icon" aria-hidden="true">∿</span><div><span class="eyebrow">EEG RESEARCH WORKBENCH</span><h1>Signal Scope</h1></div></div>
+    <div class="header-actions"><span class="connection"><span id="connection-dot" class="dot"></span><span id="connection-label">Connecting</span></span><button id="source-open" class="button secondary">Change source <span aria-hidden="true">↗</span></button></div>
+  </header>
+  <div id="processed-view" hidden>
+  <section id="source-banner" class="source-banner demo" aria-live="polite"><span class="banner-icon">D</span><div><strong id="source-title">DEMO · Generated waveform</strong><p id="source-description">Waiting for the local acquisition service. Demo signals are not measurements from your body.</p></div><button id="demo-pulse" class="button demo-button" disabled>Simulate spike</button></section>
+  <section class="workspace" aria-label="Live waveform">
+    <div class="chart-toolbar">
+      <div class="chart-heading"><span id="live-indicator" class="live-indicator"></span><h2>Live waveform</h2><span id="elapsed" class="elapsed">00:00</span></div>
+      <div class="chart-controls">
+        <label>Input <select id="channel-select"><option value="1">ADC channel 2</option><option value="0">ADC channel 1</option></select></label>
+        <label>Window <select id="window-select"><option value="5">5 seconds</option><option value="10" selected>10 seconds</option><option value="30">30 seconds</option></select></label>
+        <label>Scale <select id="scale-select"><option value="auto">Auto</option><option value="25">±25 µV</option><option value="50">±50 µV</option><option value="100">±100 µV</option><option value="250">±250 µV</option><option value="1500">±1,500 µV</option></select></label>
+        <button id="pause-button" class="button secondary" aria-pressed="false">Ⅱ Pause</button>
+      </div>
+    </div>
+    <div class="trace-header"><span><span class="line-key filtered"></span>Filtered <span class="subtle">· causal 1–30 Hz</span></span><span id="filtered-range" class="trace-value">— µV</span></div>
+    <div class="canvas-wrap filtered-wrap"><canvas id="filtered-canvas" aria-label="Filtered voltage waveform in microvolts over time" role="img"></canvas><div id="plot-overlay" class="plot-overlay">Waiting for samples…</div><span id="demo-watermark" class="demo-watermark">DEMO SIGNAL</span></div>
+    <div class="trace-header raw-header"><span><span class="line-key raw"></span>Raw input <span class="subtle">· before software filtering</span></span><span id="raw-range" class="trace-value">— µV</span></div>
+    <div class="canvas-wrap raw-wrap"><canvas id="raw-canvas" aria-label="Raw input-referred voltage waveform in microvolts over time" role="img"></canvas></div>
+    <div class="chart-footer"><span id="sample-info">0 samples · waiting</span><span>Voltage: µV <span class="separator">/</span> Time: seconds ago <span class="separator">/</span> <span id="display-state">Scrolling live</span></span></div>
+  </section>
+  <section class="metrics" aria-label="Signal measurements">
+    <div class="metric"><div class="metric-label">Signal RMS <span title="Root mean square: the typical strength of the filtered voltage, not an emotion score.">ⓘ</span></div><div class="metric-value"><span id="rms-value">—</span><small>µV</small></div><div class="metric-detail">Filtered signal strength</div></div>
+    <div class="metric"><div class="metric-label">Reaction strength</div><div class="metric-value"><span id="reaction-value">—</span><small>/ 1</small></div><div class="metric-detail" id="reaction-detail">Waiting for calibration</div></div>
+    <div class="metric"><div class="metric-label">Read rate</div><div class="metric-value"><span id="rate-value">—</span><small>Hz</small></div><div class="metric-detail" id="rate-detail">Expected 125 samples / sec</div></div>
+    <div class="metric calibration-metric"><div class="metric-label">Baseline</div><div class="metric-value baseline-value" id="baseline-value">Waiting</div><div class="progress-track"><div id="baseline-progress"></div></div><div class="metric-detail" id="quality-detail">No signal received</div></div>
+  </section>
+  <section class="event-panel">
+    <div class="event-top"><div><h2>Mark a reaction</h2><p>Add a timestamp to compare an action with the waveform.</p></div><div class="record-controls"><button id="record-button" class="button secondary"><span class="record-dot"></span><span id="record-label">Start recording</span></button><button id="export-button" class="button secondary" disabled>↓ Export CSV</button></div></div>
+    <div class="event-buttons"><button data-marker="Blink" class="event-button"><span class="event-symbol">◡</span>Blink <kbd>B</kbd></button><button data-marker="Jaw clench" class="event-button"><span class="event-symbol">⋈</span>Jaw clench <kbd>J</kbd></button><button data-marker="Scare / stimulus" class="event-button"><span class="event-symbol">ϟ</span>Scare / stimulus <kbd>S</kbd></button><form id="custom-event-form"><input id="custom-event" aria-label="Custom event label" placeholder="Custom event…" maxlength="80"><button class="button secondary" type="submit">Mark</button></form></div>
+    <div class="event-bottom"><div class="event-log" id="event-log" aria-live="polite"><span class="empty-log">No events marked yet.</span></div><button id="clear-event-log" class="button secondary clear-log-button" disabled>Clear log</button><span id="record-state" class="record-state">Recording off</span></div>
+  </section>
+  </div>
+  <section id="bench-view" aria-label="Raw diagnostic capture">
+    <section class="event-panel bench-recording-panel" aria-label="Object bench recording">
+      <div class="event-top"><div><h2>Record</h2></div><div class="record-controls"><button id="bench-record-start" class="button primary" disabled><span class="record-dot"></span><span id="bench-record-start-label">Start recording</span></button><button id="bench-record-stop" class="button secondary" disabled>■ Stop</button></div></div>
+      <div class="bench-stream-status"><span id="bench-reception-pill" class="bench-reception-pill" role="status" data-state="stopped">Stopped</span><span id="bench-restart-count" class="record-state">Automatic restarts: 0 / 3</span></div>
+      <div class="bench-recording-status"><span id="bench-record-stage" role="status">Checking recording controls…</span><span id="bench-record-elapsed" class="record-state"></span></div>
+      <p id="bench-record-message" class="setup-note">Ready.</p>
+      <p id="bench-record-error" class="error-text" role="alert"></p>
+      <div class="event-buttons"><button id="bench-mark-blink" class="event-button" disabled><span class="event-symbol">◡</span>Mark blink <kbd>B</kbd></button><button id="bench-mark-jaw" class="event-button" disabled><span class="event-symbol">⋈</span>Mark jaw clench <kbd>J</kbd></button><button id="bench-mark-reaction" class="event-button" disabled><span class="event-symbol">ϟ</span>Mark startle / flinch <kbd>S</kbd></button><form id="bench-custom-marker-form"><input id="bench-custom-marker" aria-label="Custom object bench marker" placeholder="Custom marker…" maxlength="80"><button id="bench-mark-custom" class="button secondary" type="submit" disabled>Mark</button></form><div class="bench-exports"><a id="bench-export-csv" class="button secondary" href="/api/bench-recording/export.csv" download="object-bench-recording.csv" aria-disabled="true">↓ CSV</a><a id="bench-export-json" class="button secondary" href="/api/bench-recording/export.json" download="object-bench-recording.json" aria-disabled="true">↓ JSON</a></div></div>
+      <p class="bench-marker-note">Markers are self-reported. Unaligned markers stay in the log.</p>
+      <div id="bench-marker-log" class="bench-marker-log" aria-live="polite"><span class="empty-log">No markers in this object recording.</span></div>
+    </section>
+    <div class="workspace">
+      <div class="chart-toolbar"><div><h2 id="bench-status" role="status">Loading capture…</h2><span class="bench-units-note">Raw counts · unverified</span><p id="bench-message" class="subtle">Reading the saved local capture file.</p></div>
+        <div class="chart-controls"><label>Phase <select id="bench-phase"><option>No phases yet</option></select></label><label><input type="checkbox" id="bench-follow" checked> Follow newest phase</label><a href="/api/bench-raw" class="button secondary" download="bench-capture.txt">↓ Original capture</a></div>
+      </div>
+      <div class="trace-header"><span><span class="line-key filtered"></span>Channel 1 · raw signed 24-bit counts</span><span id="bench-range-1" class="trace-value">No data</span></div>
+      <div class="canvas-wrap bench-canvas-wrap"><canvas id="bench-canvas-1" role="img" aria-label="Diagnostic channel 1 raw counts against actual Uno read time"></canvas></div>
+      <div class="trace-header raw-header"><span><span class="line-key raw"></span>Channel 2 · raw signed 24-bit counts</span><span id="bench-range-2" class="trace-value">No data</span></div>
+      <div class="canvas-wrap bench-canvas-wrap"><canvas id="bench-canvas-2" role="img" aria-label="Diagnostic channel 2 raw counts against actual Uno read time"></canvas></div>
+      <div class="chart-footer"><span>Y: independent raw count scales · X: actual Uno host-read seconds within each phase</span><span>Gaps break the line; no generated or fallback points.</span></div>
+    </div>
+    <details class="event-panel bench-diagnostics"><summary>Diagnostics</summary>
+    <section class="metrics" aria-label="Diagnostic capture integrity">
+      <div class="metric"><div class="metric-label">Captured raw frames</div><div id="bench-frames" class="metric-value">0</div><div class="metric-detail">Selected phase · not validated EEG</div></div>
+      <div class="metric"><div class="metric-label">Invalid status structures</div><div id="bench-invalid" class="metric-value">—</div><div class="metric-detail">Passing structure alone is insufficient</div></div>
+      <div class="metric"><div class="metric-label">Register mismatches</div><div id="bench-mismatches" class="metric-value">—</div><div class="metric-detail">Readback remains untrusted</div></div>
+      <div class="metric"><div class="metric-label">Display gaps</div><div id="bench-gaps" class="metric-value">0</div><div class="metric-detail">Missing sequence or >24 ms timestamp gap</div></div>
+    </section>
+    <pre id="bench-details" class="bench-details">No capture metadata yet.</pre><p class="subtle">This capture keeps its source and phase metadata. Download the original capture above to retain its raw bytes. Existing recordings and markers are preserved when you change sources.</p></details>
+  </section>
+  <footer class="app-footer"><p><strong>Electrical reactions, not a fear diagnosis.</strong> Blinks, muscle tension, and motion can produce spikes. Numerical quality checks do not establish brain origin.</p><span>Local acquisition · no cloud upload</span></footer>
+</main>
+<dialog id="source-dialog">
+  <form id="source-form">
+    <div class="dialog-heading"><div><span class="eyebrow">ACQUISITION</span><h2>Choose a signal source</h2></div><button type="button" id="source-close" class="icon-button" aria-label="Close source settings">×</button></div>
+    <label class="field-label" for="source-select">Source</label><select id="source-select"><option value="raw_diagnostic">Object bench · record raw counts</option><option value="synthetic">Demo · synthetic waveform</option><option value="internal_test">Uno · internal test generator</option><option value="shorted_input">Uno · internally shorted inputs</option><option value="external_input" disabled>Electrode input · not enabled</option></select>
+    <div id="serial-fields" hidden><label class="field-label" for="port-select">USB serial device</label><div class="port-row"><select id="port-select"><option value="">No device found</option></select><button type="button" id="refresh-ports" class="button secondary">Refresh</button></div><p class="setup-note">Bench sources only. Keep electrodes disconnected. Selecting a source does not flash or change the sensor firmware. Opening an Uno serial port may reset it.</p><label class="confirm-check"><input type="checkbox" id="bench-confirm">Electrodes are disconnected from the board.</label></div>
+    <p id="raw-source-note" class="setup-note" hidden>Shows raw diagnostic counts in this workspace. Choosing this source does not start hardware. The separate Start recording button runs a continuous nonhuman-object test until Stop and restores the original bench firmware. No human EEG mode, voltage conversion or reaction score. Existing waveform recordings stay separate.</p>
+    <p id="demo-note" class="setup-note">Generated data lets you test the viewer. It is not live EEG. “Simulate spike” creates an artificial pulse only in this mode.</p>
+    <p class="setup-note">External-electrode firmware has not been verified; human EEG mode is unavailable.</p><p id="source-error" class="error-text" role="alert"></p>
+    <div class="dialog-actions"><button type="button" id="calibrate-button" class="button secondary">Reset baseline</button><button id="source-apply" class="button primary" type="submit">Use source</button></div>
+  </form>
+</dialog>
+<div id="toast" class="toast" role="status" hidden></div>
+<script type="module" src="/app.js?v=continuous-object-controls-1"></script>
+<script type="module" src="/auto-refresh.js?v=1"></script>
+<script type="module" src="/partner-link.js?v=3"></script>
+</body>
+</html>

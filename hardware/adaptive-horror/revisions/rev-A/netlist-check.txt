@@ -1,0 +1,4 @@
+PASS: 9 sensor-to-Uno wires, 3 cable-contact links, 4 USB conductors.
+PASS: CLK, GPIO1 and GPIO2 are deliberate no-connects.
+PASS: no other connections or accidental shorts in exported netlist.
+LIMIT: module-level passive pins do not model internal protection, isolation, firmware or EEG suitability.

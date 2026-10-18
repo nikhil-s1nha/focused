@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {initBenchPanel, isBenchView, setBenchView, benchConnection} from './bench-panel.js';
+
+const nodes=new Map();
+function node(id){if(!nodes.has(id))nodes.set(id,{hidden:false,value:'',checked:false,dataset:{},clientWidth:0,clientHeight:0,listeners:{},classList:{toggle(){}},append(){},getAttribute(k){return this[k];},setAttribute(k,v){this[k]=v;},addEventListener(k,v){this.listeners[k]=v;},replaceChildren(...items){this.children=items;}});return nodes.get(id);}
+globalThis.document={getElementById:node,querySelector:node,createElement:node,addEventListener(){}};
+globalThis.window={addEventListener(){}};
+globalThis.location={href:'http://127.0.0.1:8767/',search:''};
+globalThis.history={replaceState(_s,_t,url){location.href=String(url);location.search=new URL(url).search;}};
+globalThis.Option=class {constructor(label,value){this.text=label;this.value=value;}};
+globalThis.setTimeout=()=>0;
+const requests=[];
+globalThis.fetch=async(path,options)=>{requests.push([path,options]);return {ok:true,json:async()=>({status:'waiting_for_file',phases:[],session:0,source:'untrusted_bench_log',units:'raw signed 24-bit counts',not_eeg:true,filtered:false,file_name:'capture.txt',clock_basis:'Uno read clock',malformed_rows:0,ignored_rows:0})};};
+let refreshes=0;
+initBenchPanel(()=>refreshes++);
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(isBenchView(),true);
+assert.equal(node('processed-view').hidden,true);
+assert.equal(node('bench-view').hidden,false);
+setBenchView(true);
+assert.equal(node('processed-view').hidden,true);
+assert.equal(node('bench-view').hidden,false);
+assert.equal(node('source-open').hidden,false);
+assert.equal(node('.connection').hidden,false);
+assert.equal(new URL(location.href).searchParams.get('source'),'raw_diagnostic');
+assert.match(benchConnection().label,/No frames/);
+setBenchView(false);
+assert.equal(node('processed-view').hidden,false);
+assert.equal(node('bench-view').hidden,true);
+assert.equal(new URL(location.href).searchParams.get('source'),'synthetic');
+assert.ok(refreshes>=3);
+assert.deepEqual(requests.map(([path])=>path),['/api/bench-state','/api/bench-recording']);
+assert.ok(requests.every(([,options])=>!options.method || options.method==='GET'));
+location.href='http://127.0.0.1:8767/?view=bench';location.search='?view=bench';
+initBenchPanel();
+assert.equal(isBenchView(),true);
+assert.equal(new URL(location.href).searchParams.get('source'),'raw_diagnostic');
+for(const source of ['synthetic','internal_test','shorted_input']){location.href='http://127.0.0.1:8767/?source='+source;location.search='?source='+source;node('source-select').value='';initBenchPanel();assert.equal(isBenchView(),false);assert.equal(new URL(location.href).searchParams.get('source'),source);}
+const html=fs.readFileSync(new URL('./index.html',import.meta.url),'utf8');
+assert.ok(!html.includes('scope-tabs'));
+assert.ok(!html.includes('id="view-bench"'));
+assert.ok(html.includes('value="raw_diagnostic"'));
+assert.ok(html.includes('Change source'));
+console.log('PASS: one source-controlled workspace, read-only capture selection, persistent Change source, bench-by-default root, explicit processed source URLs, legacy URL compatibility.');

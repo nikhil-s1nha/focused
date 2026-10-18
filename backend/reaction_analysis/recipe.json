@@ -1,0 +1,34 @@
+{
+  "version": "raw-reaction-v1",
+  "locked_before_run_completion": "object-ui-20261018T001042Z-efa67c06802445ee84def5b236000efb",
+  "prospective_claim_requires_run_started_after_recipe_lock": false,
+  "validation_note": "The fourth run was already underway; no waveform or outcomes were inspected for recipe selection. Treat as forward outcome check, not a randomized prospective experiment.",
+  "labels": [
+    "Blink",
+    "Jaw clench",
+    "Startle / flinch",
+    "Background"
+  ],
+  "marker_time": "nearest_read_micros / 1e6 + frame_age_seconds; local parse age, not synchronized stimulus onset",
+  "assumed_click_uncertainty_seconds": 0.5,
+  "feature_half_window_seconds": 1.0,
+  "features_per_channel": [
+    "log1p_population_std",
+    "log1p_mean_absolute_first_difference",
+    "negative_fraction",
+    "zero_fraction"
+  ],
+  "minimum_window_rows": 200,
+  "maximum_timestamp_gap_seconds": 0.024,
+  "maximum_edge_missing_seconds": 0.025,
+  "background_spacing_seconds": 2.0,
+  "background_min_distance_to_marker_seconds": 2.0,
+  "classifier": "training-only standardization and equally weighted nearest class centroid; no probability or clinical confidence",
+  "normalization_floor_std": 1e-12,
+  "event_detection": "absolute firstdifference strictly above perrecording/channel99th percentile;250ms withinchannel and100ms pooled strongest-first suppression; optimalone-to-onematcheswithin0.5s",
+  "controls": "equal-opportunity circular shift of full manual marker schedule; same uncertain window and gap rules; descriptive only",
+  "evaluation": "latestwholefinishedrecording holdout, train on earliercomplete recordings; retrospective leave-one-recording-out supplementary",
+  "rejection": "invalidstatus/configuration always yields unreliable, regardless of experimental candidate label",
+  "sign_bit_masking": "not used",
+  "locked_at_utc": "2026-10-18T00:12:15.452444+00:00"
+}

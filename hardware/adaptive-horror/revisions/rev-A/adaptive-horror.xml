@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<export version="E">
+  <design>
+    <source>/path/to/focused/hardware/adaptive-horror/adaptive-horror.kicad_sch</source>
+    <date>2026-10-17T10:25:35</date>
+    <tool>Eeschema 10.0.6</tool>
+    <sheet number="1" name="/" tstamps="/">
+      <title_block>
+        <title>Adaptive Horror | Biosignal Bench Wiring</title>
+        <company>MOLTEN hackathon prototype</company>
+        <rev>A</rev>
+        <date>2026-10-17</date>
+        <source>adaptive-horror.kicad_sch</source>
+        <comment number="1" value="Module wiring reference; not a medical device or body-use approval"/>
+        <comment number="2" value=""/>
+        <comment number="3" value=""/>
+        <comment number="4" value=""/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+  </design>
+  <components>
+    <comp ref="A1">
+      <value>Arduino Uno R3 (5 V)</value>
+      <fields>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="AdaptiveHorror" part="UnoR3" description=""/>
+      <property name="Sheetname" value="adaptive-horror"/>
+      <property name="Sheetfile" value="adaptive-horror.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>2857b457-9bba-5a67-b2c4-73b073d93db5</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="5V"/>
+            <pin num="GND"/>
+            <pin num="D13"/>
+            <pin num="D12"/>
+            <pin num="D11"/>
+            <pin num="D7"/>
+            <pin num="D6"/>
+            <pin num="D5"/>
+            <pin num="D4"/>
+            <pin num="VBUS"/>
+            <pin num="D+"/>
+            <pin num="D-"/>
+            <pin num="GND_USB"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="A2">
+      <value>Orange Pi 5 Pro</value>
+      <fields>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="AdaptiveHorror" part="OrangePi" description=""/>
+      <property name="Sheetname" value="adaptive-horror"/>
+      <property name="Sheetfile" value="adaptive-horror.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>114feafd-47a4-5fcf-9002-49867aa8609b</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="VBUS"/>
+            <pin num="D+"/>
+            <pin num="D-"/>
+            <pin num="GND"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="J1">
+      <value>3 wet electrodes / TRS cable</value>
+      <fields>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="AdaptiveHorror" part="WetLead" description=""/>
+      <property name="Sheetname" value="adaptive-horror"/>
+      <property name="Sheetfile" value="adaptive-horror.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>127d7ff8-29ff-5935-aa4c-e29af73c94db</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="TIP"/>
+            <pin num="RING"/>
+            <pin num="SLEEVE"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="U1">
+      <value>ADS1292R legacy breakout</value>
+      <fields>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="AdaptiveHorror" part="ProtoCentral" description=""/>
+      <property name="Sheetname" value="adaptive-horror"/>
+      <property name="Sheetfile" value="adaptive-horror.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>819495eb-ba66-5f1a-b614-4058f6264f65</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="JACK_TIP"/>
+            <pin num="JACK_RING"/>
+            <pin num="JACK_SLEEVE"/>
+            <pin num="VDD"/>
+            <pin num="GND"/>
+            <pin num="SCK"/>
+            <pin num="MISO"/>
+            <pin num="MOSI"/>
+            <pin num="CS"/>
+            <pin num="DRDY"/>
+            <pin num="START"/>
+            <pin num="RESET"/>
+            <pin num="CLK"/>
+            <pin num="GPIO1"/>
+            <pin num="GPIO2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+  </components>
+  <libparts>
+    <libpart lib="AdaptiveHorror" part="OrangePi">
+      <fields>
+        <field name="Reference">A2</field>
+        <field name="Value">Orange Pi 5 Pro</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <pins>
+        <pin num="D+" name="D+" type="passive"/>
+        <pin num="D-" name="D-" type="passive"/>
+        <pin num="GND" name="GND" type="passive"/>
+        <pin num="VBUS" name="VBUS" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="AdaptiveHorror" part="ProtoCentral">
+      <fields>
+        <field name="Reference">U1</field>
+        <field name="Value">ADS1292R legacy breakout</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <pins>
+        <pin num="CLK" name="CLK" type="passive"/>
+        <pin num="CS" name="CS" type="passive"/>
+        <pin num="DRDY" name="DRDY" type="passive"/>
+        <pin num="GND" name="GND" type="passive"/>
+        <pin num="GPIO1" name="GPIO1" type="passive"/>
+        <pin num="GPIO2" name="GPIO2" type="passive"/>
+        <pin num="JACK_RING" name="Jack_RING" type="passive"/>
+        <pin num="JACK_SLEEVE" name="Jack_SLEEVE" type="passive"/>
+        <pin num="JACK_TIP" name="Jack_TIP" type="passive"/>
+        <pin num="MISO" name="MISO" type="passive"/>
+        <pin num="MOSI" name="MOSI" type="passive"/>
+        <pin num="RESET" name="RESET" type="passive"/>
+        <pin num="SCK" name="SCK" type="passive"/>
+        <pin num="START" name="START" type="passive"/>
+        <pin num="VDD" name="VDD" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="AdaptiveHorror" part="UnoR3">
+      <fields>
+        <field name="Reference">A1</field>
+        <field name="Value">Arduino Uno R3 (5 V)</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <pins>
+        <pin num="5V" name="5V" type="passive"/>
+        <pin num="D+" name="D+" type="passive"/>
+        <pin num="D-" name="D-" type="passive"/>
+        <pin num="D4" name="D4" type="passive"/>
+        <pin num="D5" name="D5" type="passive"/>
+        <pin num="D6" name="D6" type="passive"/>
+        <pin num="D7" name="D7" type="passive"/>
+        <pin num="D11" name="D11" type="passive"/>
+        <pin num="D12" name="D12" type="passive"/>
+        <pin num="D13" name="D13" type="passive"/>
+        <pin num="GND" name="GND" type="passive"/>
+        <pin num="GND_USB" name="GND" type="passive"/>
+        <pin num="VBUS" name="VBUS" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="AdaptiveHorror" part="WetLead">
+      <fields>
+        <field name="Reference">J1</field>
+        <field name="Value">3 wet electrodes / TRS cable</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <pins>
+        <pin num="RING" name="RING" type="passive"/>
+        <pin num="SLEEVE" name="SLEEVE" type="passive"/>
+        <pin num="TIP" name="TIP" type="passive"/>
+      </pins>
+    </libpart>
+  </libparts>
+  <libraries>
+    <library logical="AdaptiveHorror">
+      <uri>${KIPRJMOD}/AdaptiveHorror.kicad_sym</uri>
+    </library>
+  </libraries>
+  <nets>
+    <net code="1" name="Net-(A1-GND-PadGND_USB)" class="Default">
+      <node ref="A1" pin="GND_USB" pinfunction="GND_GND_USB" pintype="passive"/>
+      <node ref="A2" pin="GND" pinfunction="GND_GND" pintype="passive"/>
+    </net>
+    <net code="2" name="Net-(A1-Pad5V)" class="Default">
+      <node ref="A1" pin="5V" pinfunction="5V_5V" pintype="passive"/>
+      <node ref="U1" pin="VDD" pinfunction="VDD_VDD" pintype="passive"/>
+    </net>
+    <net code="3" name="Net-(A1-PadD+)" class="Default">
+      <node ref="A1" pin="D+" pinfunction="D+_D+" pintype="passive"/>
+      <node ref="A2" pin="D+" pinfunction="D+_D+" pintype="passive"/>
+    </net>
+    <net code="4" name="Net-(A1-PadD-)" class="Default">
+      <node ref="A1" pin="D-" pinfunction="D-_D-" pintype="passive"/>
+      <node ref="A2" pin="D-" pinfunction="D-_D-" pintype="passive"/>
+    </net>
+    <net code="5" name="Net-(A1-PadD4)" class="Default">
+      <node ref="A1" pin="D4" pinfunction="D4_D4" pintype="passive"/>
+      <node ref="U1" pin="RESET" pinfunction="RESET_RESET" pintype="passive"/>
+    </net>
+    <net code="6" name="Net-(A1-PadD5)" class="Default">
+      <node ref="A1" pin="D5" pinfunction="D5_D5" pintype="passive"/>
+      <node ref="U1" pin="START" pinfunction="START_START" pintype="passive"/>
+    </net>
+    <net code="7" name="Net-(A1-PadD6)" class="Default">
+      <node ref="A1" pin="D6" pinfunction="D6_D6" pintype="passive"/>
+      <node ref="U1" pin="DRDY" pinfunction="DRDY_DRDY" pintype="passive"/>
+    </net>
+    <net code="8" name="Net-(A1-PadD7)" class="Default">
+      <node ref="A1" pin="D7" pinfunction="D7_D7" pintype="passive"/>
+      <node ref="U1" pin="CS" pinfunction="CS_CS" pintype="passive"/>
+    </net>
+    <net code="9" name="Net-(A1-PadD11)" class="Default">
+      <node ref="A1" pin="D11" pinfunction="D11_D11" pintype="passive"/>
+      <node ref="U1" pin="MOSI" pinfunction="MOSI_MOSI" pintype="passive"/>
+    </net>
+    <net code="10" name="Net-(A1-PadD12)" class="Default">
+      <node ref="A1" pin="D12" pinfunction="D12_D12" pintype="passive"/>
+      <node ref="U1" pin="MISO" pinfunction="MISO_MISO" pintype="passive"/>
+    </net>
+    <net code="11" name="Net-(A1-PadD13)" class="Default">
+      <node ref="A1" pin="D13" pinfunction="D13_D13" pintype="passive"/>
+      <node ref="U1" pin="SCK" pinfunction="SCK_SCK" pintype="passive"/>
+    </net>
+    <net code="12" name="Net-(A1-PadGND)" class="Default">
+      <node ref="A1" pin="GND" pinfunction="GND_GND" pintype="passive"/>
+      <node ref="U1" pin="GND" pinfunction="GND_GND" pintype="passive"/>
+    </net>
+    <net code="13" name="Net-(A1-PadVBUS)" class="Default">
+      <node ref="A1" pin="VBUS" pinfunction="VBUS_VBUS" pintype="passive"/>
+      <node ref="A2" pin="VBUS" pinfunction="VBUS_VBUS" pintype="passive"/>
+    </net>
+    <net code="14" name="Net-(U1-Jack_RING)" class="Default">
+      <node ref="J1" pin="RING" pinfunction="RING_RING" pintype="passive"/>
+      <node ref="U1" pin="JACK_RING" pinfunction="Jack_RING_JACK_RING" pintype="passive"/>
+    </net>
+    <net code="15" name="Net-(U1-Jack_SLEEVE)" class="Default">
+      <node ref="J1" pin="SLEEVE" pinfunction="SLEEVE_SLEEVE" pintype="passive"/>
+      <node ref="U1" pin="JACK_SLEEVE" pinfunction="Jack_SLEEVE_JACK_SLEEVE" pintype="passive"/>
+    </net>
+    <net code="16" name="Net-(U1-Jack_TIP)" class="Default">
+      <node ref="J1" pin="TIP" pinfunction="TIP_TIP" pintype="passive"/>
+      <node ref="U1" pin="JACK_TIP" pinfunction="Jack_TIP_JACK_TIP" pintype="passive"/>
+    </net>
+    <net code="17" name="unconnected-(U1-PadCLK)" class="Default">
+      <node ref="U1" pin="CLK" pinfunction="CLK_CLK" pintype="passive+no_connect"/>
+    </net>
+    <net code="18" name="unconnected-(U1-PadGPIO1)" class="Default">
+      <node ref="U1" pin="GPIO1" pinfunction="GPIO1_GPIO1" pintype="passive+no_connect"/>
+    </net>
+    <net code="19" name="unconnected-(U1-PadGPIO2)" class="Default">
+      <node ref="U1" pin="GPIO2" pinfunction="GPIO2_GPIO2" pintype="passive+no_connect"/>
+    </net>
+  </nets>
+</export>

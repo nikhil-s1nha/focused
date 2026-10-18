@@ -1,0 +1,7 @@
+{
+  "name": "adaptive-horror-web-starter",
+  "private": true,
+  "type": "module",
+  "scripts": {"start": "node server.mjs", "test": "node --test"},
+  "dependencies": {"aframe": "1.8.0", "ws": "8.22.0"}
+}

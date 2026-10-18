@@ -1,0 +1,140 @@
+{
+  "source_url": "https://github.com/Protocentral/ADS1292rShield_Breakout/blob/78d4c71237888394fc233803c64684b348a3c30d/hardware/breakout/pc_ads1292r_brk_v3.sch",
+  "local_source_sha256": "ed984a4ed3c35cdd90e5b5439a8e8ea705cddceb78f70176c24958f381656c97",
+  "parts": {
+    "R20": {
+      "value": "0R",
+      "deviceset": "R-US_"
+    },
+    "R22": {
+      "value": "0R",
+      "deviceset": "R-US_"
+    },
+    "R24": {
+      "value": "100k",
+      "deviceset": "R-US_"
+    },
+    "R23": {
+      "value": "0R",
+      "deviceset": "R-US_"
+    },
+    "JP3": {
+      "value": null,
+      "deviceset": "AUDIO-JACK"
+    }
+  },
+  "nets": [
+    {
+      "net": "N$45",
+      "pins": [
+        {
+          "part": "C23",
+          "pin": "1"
+        },
+        {
+          "part": "R22",
+          "pin": "1"
+        },
+        {
+          "part": "JP3",
+          "pin": "RIGHT"
+        }
+      ]
+    },
+    {
+      "net": "N$50",
+      "pins": [
+        {
+          "part": "U$8",
+          "pin": "RLDOUT"
+        },
+        {
+          "part": "R23",
+          "pin": "2"
+        }
+      ]
+    },
+    {
+      "net": "N$51",
+      "pins": [
+        {
+          "part": "R24",
+          "pin": "1"
+        },
+        {
+          "part": "JP3",
+          "pin": "SLEEVE"
+        }
+      ]
+    },
+    {
+      "net": "N$30",
+      "pins": [
+        {
+          "part": "C38",
+          "pin": "1"
+        },
+        {
+          "part": "R20",
+          "pin": "1"
+        },
+        {
+          "part": "JP3",
+          "pin": "LEFT"
+        }
+      ]
+    },
+    {
+      "net": "N$12",
+      "pins": [
+        {
+          "part": "U$8",
+          "pin": "IN2P"
+        },
+        {
+          "part": "R22",
+          "pin": "2"
+        }
+      ]
+    },
+    {
+      "net": "N$14",
+      "pins": [
+        {
+          "part": "U$8",
+          "pin": "IN2N"
+        },
+        {
+          "part": "R20",
+          "pin": "2"
+        }
+      ]
+    },
+    {
+      "net": "N$35",
+      "pins": [
+        {
+          "part": "R21",
+          "pin": "1"
+        },
+        {
+          "part": "R23",
+          "pin": "1"
+        },
+        {
+          "part": "R19",
+          "pin": "1"
+        },
+        {
+          "part": "C62",
+          "pin": "1"
+        },
+        {
+          "part": "R24",
+          "pin": "2"
+        }
+      ]
+    }
+  ],
+  "note": "JP3 LEFT/TIP, RIGHT/RING, SLEEVE contact identities from AUDIO-JACK SMD2 symbol. Actual detachable cable colors and body placement remain unverified."
+}

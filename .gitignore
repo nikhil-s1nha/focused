@@ -1,5 +1,33 @@
-node_modules/
+# Machine state and downloaded dependencies
+.DS_Store
+**/__pycache__/
+*.py[cod]
+**/.venv/
+**/node_modules/
 dist/
-certs/
+.pytest_cache/
+.coverage
+*.egg-info/
+
+# Credentials and local configuration
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+certs/
+
+# Captures, personal media, logs, and generated bundles
+backend/results/
+firmware/results/
+deliverables/
 *.log
+*.zip
+
+# Downloaded toolchains
+tools/arduino/
+
+# KiCad local state
+*.kicad_prl
+~*.lck
+*-backups/

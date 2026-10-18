@@ -1,0 +1,20 @@
+{
+  "internal_test": {
+    "sample_rate": 125,
+    "read_rate_window_intervals": 125,
+    "read_rate_relative_tolerance": 0.1,
+    "gain": 1,
+    "nominal_reference_volts": 2.42,
+    "firmware": "SensorBenchTest",
+    "metadata_basis": "previously uploaded and bench-tested firmware configuration; reference is nominal, not measured"
+  },
+  "shorted_input": {
+    "sample_rate": 125,
+    "read_rate_window_intervals": 125,
+    "read_rate_relative_tolerance": 0.1,
+    "gain": 6,
+    "nominal_reference_volts": 2.42,
+    "firmware": "SensorNoiseTest",
+    "metadata_basis": "previous bench register readback; reference is nominal, not measured"
+  }
+}
