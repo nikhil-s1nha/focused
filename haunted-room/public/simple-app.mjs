@@ -830,6 +830,7 @@ function showReactionIndicator(m){
 const signalLink = installSignalLink({
  onHook:eventDriven ? m=>{showReactionIndicator(m);return eventDirector.receiveHook(m);} : null,
  onReaction:m=>eventDriven && eventDirector.receive(m),
+ onVision:m=>{const accepted=eventDriven && eventDirector.receiveVision(m);if(accepted)showScareIndicator();return accepted;},
  canApply:()=>phase === "running" && !spectate,
  actions:{
   light:c=>applyExistingEffect("flicker",c),

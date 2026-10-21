@@ -4,6 +4,11 @@ A two-minute adaptive haunted room for the Quest 3S browser. Built from the requ
 
 ## Start here
 
+For the current game, open `/simple.html`. The graph input page is `/roboflow.html`;
+see [ROBOFLOW-SETUP.txt](ROBOFLOW-SETUP.txt) for model/Workflow setup and the local
+detector option. The original continuous-signal prototype is still at `/` and
+described below.
+
 ```sh
 cd haunted-room
 npm ci

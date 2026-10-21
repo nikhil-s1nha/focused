@@ -2,6 +2,11 @@
 
 The active build is **[The Quiet Room](haunted-room/README.md)** — a two-minute adaptive horror WebXR experience for Meta Quest 3S.
 
+The current game is at `/simple.html`. The graph monitor is at `/roboflow.html`:
+it can send selected graph frames to a Roboflow model or Workflow and pass matching
+events to the game's scare director. There is also a separate local graph detector
+for trying the flow without an API key. [Setup](haunted-room/ROBOFLOW-SETUP.txt).
+
 ```sh
 cd haunted-room
 npm ci

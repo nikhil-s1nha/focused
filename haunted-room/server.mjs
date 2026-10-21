@@ -7,13 +7,18 @@ import { WebSocketServer } from "ws";
 import { sanitizeSignal } from "./relay.mjs";
 import { sanitizeSpectate } from "./spectate.mjs";
 import { createSignalLink } from "./signal-link/receiver.mjs";
+import { createRoboflowBridge } from "./roboflow/bridge.mjs";
+import { createLocalGraphBridge } from "./roboflow/local-bridge.mjs";
 const root = path.dirname(fileURLToPath(import.meta.url));
 export function createSceneServer({
   tls = null,
   publishToken = process.env.PUBLISH_TOKEN,
   signalToken = process.env.SIGNAL_TOKEN,
+  roboflowOptions = {},
 } = {}) {
   const signalLink = createSignalLink({ signalToken });
+  const roboflow = createRoboflowBridge({ ...roboflowOptions, getGameState: signalLink.getGameState, publish: signalLink.publishVision });
+  const graphDetector = createLocalGraphBridge({ getGameState: signalLink.getGameState, publish: signalLink.publishVision });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 8192 });
   // Spectator relay: the headset page publishes pose/events/phase; TV pages replay them.
   const spectators = new WebSocketServer({ noServer: true, maxPayload: 2048 });
@@ -21,6 +26,8 @@ export function createSceneServer({
     lastPose = null;
   const handler = (req, res) => {
     const pathname = new URL(req.url, "http://local").pathname;
+    if (roboflow.handle(req, res, pathname)) return;
+    if (graphDetector.handle(req, res, pathname)) return;
     if (signalLink.handle(req, res, pathname)) return;
     if (pathname === "/api/signal") {
       if (req.method !== "POST") {
@@ -155,8 +162,8 @@ export function createSceneServer({
       sockets.emit("connection", ws, req);
     });
   });
-  server.on("close", () => signalLink.close());
-  return { server, sockets, spectators, signalLink };
+  server.on("close", () => { graphDetector.close(); roboflow.close(); signalLink.close(); });
+  return { server, sockets, spectators, signalLink, roboflow, graphDetector };
 }
 if (
   process.argv[1] &&

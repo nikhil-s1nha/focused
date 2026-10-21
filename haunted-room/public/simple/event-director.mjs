@@ -1,11 +1,20 @@
 import {validEvent} from '../signal-link/config.mjs';
 import {validReaction} from '../signal-link/reaction-contract.mjs';
+import {validVision} from '../signal-link/vision-contract.mjs';
 const TYPES=['crawl','creep','watcher','retreat','rush','feint','lighting','audio'];
 const DOORS=['left','right','front','back'];
 export class EventDirector {
  constructor({cadenceSeconds=null,rng=Math.random,now=()=>performance.now()/1000,emit=()=>{}}={}){this.cadenceSeconds=cadenceSeconds;this.rng=rng;this.now=now;this.emit=emit;this.seen=new Set();this.active=false;this.status='Ready';}
  start(id){this.session=id;this.active=true;this.current=null;this.pending=null;this.last=null;this.count=0;this.weights=Object.fromEntries(TYPES.map(t=>[t,1]));this.seen.clear();this.next=this.now()+4+this.rng()*3;this.opening=true;this.openingRemaining=3;this.openingKinds=new Set();this.status='Opening encounter pending';this.emit({event:'session_started',session_id:id});}
  stop(){if(this.active)this.emit({event:'session_ended',session_id:this.session});this.active=false;this.current=null;this.pending=null;this.status='Session ended';}
+ receiveVision(m){
+  if(!validVision(m))return this.reject('Invalid visual observation');
+  if(!this.active||m.session_id!==this.session||m.encounter_id!==(this.current||this.last)?.encounter_id)return this.reject('Visual observation belongs to another encounter');
+  if(this.seen.has(m.id))return this.reject('Duplicate visual observation');
+  this.seen.add(m.id);if(this.seen.size>512)this.seen.delete(this.seen.values().next().value);
+  this.pending={...m,reaction:'visual_pattern',receipt:this.now()};
+  this.status='Graph pattern matched; waiting for encounter / cooldown';return true;
+ }
  receiveHook(m){
   if(!validEvent(m))return this.reject('Invalid partner hook');
   if(!this.active)return this.reject('Session inactive');
@@ -34,7 +43,8 @@ export class EventDirector {
   if(!this.opening&&!this.cadenceSeconds){if(!this.pending){this.status='Waiting for partner reaction';return null;}if(now-this.pending.receipt>15){this.pending=null;this.status='Reaction expired; waiting';return null;}}
   if(this.pending&&now-this.pending.receipt>15)this.pending=null;
   const reaction=this.pending;this.pending=null;
-  if(reaction&&this.last){const t=this.last.kind;this.weights[t]=Math.max(.35,Math.min(2.5,this.weights[t]+(reaction.reaction==='startled'?.3:reaction.reaction==='no_detected_reaction'?-.3:0)));}
+  // A configured visual class match is a small preference signal, not a fear score.
+  if(reaction&&this.last){const t=this.last.kind;this.weights[t]=Math.max(.35,Math.min(2.5,this.weights[t]+(reaction.reaction==='startled'?.3:reaction.reaction==='visual_pattern'?.15:reaction.reaction==='no_detected_reaction'?-.3:0)));}
   let pool=TYPES.filter(t=>t!==this.last?.kind && (!this.opening || !this.openingKinds.has(t)));
   // Follow a strong scare with contrast, rather than another immediate heavy hit.
   if(!this.opening&&reaction?.reaction==='startled'&&(reaction.reaction_strength??.5)>.65)pool=['watcher','feint','lighting','audio'].filter(t=>t!==this.last?.kind);

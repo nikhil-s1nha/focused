@@ -1,6 +1,7 @@
 import {createControl,CONTROL_CAPABILITY} from './control.mjs';
 import {sanitizeThreshold,THRESHOLD_CAPABILITY} from '../public/signal-link/threshold-contract.mjs';
 import {validReaction} from '../public/signal-link/reaction-contract.mjs';
+import {validVision} from '../public/signal-link/vision-contract.mjs';
 import { timingSafeEqual } from 'node:crypto';
 
 const EVENTS = new Set(['blink', 'jaw_clench', 'startle_flinch', 'reaction']);
@@ -24,6 +25,7 @@ export function createSignalLink({ signalToken = process.env.SIGNAL_TOKEN, now =
   let accepted = 0, duplicates = 0, rejected = 0, lastEvent = null;
   function json(res,status,body) { res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'}).end(JSON.stringify(body)); }
   function authorized(req) {
+    if (!enabled) return false;
     const supplied = req.headers.authorization;
     if (typeof supplied !== 'string') return false;
     const actual = Buffer.from(supplied), expected = Buffer.from(`Bearer ${signalToken}`);
@@ -51,8 +53,8 @@ export function createSignalLink({ signalToken = process.env.SIGNAL_TOKEN, now =
       res.on('close',() => { clearInterval(heartbeat); clients.delete(res); });
       return true;
     }
-    if (!enabled) { json(res,503,{error:'Signal link disabled: configure SIGNAL_TOKEN with at least 24 characters'}); req.resume(); return true; }
     const gamePost=pathname==='/signal-link/game';
+    if (!enabled && !gamePost) { json(res,503,{error:'Signal link disabled: configure SIGNAL_TOKEN with at least 24 characters'}); req.resume(); return true; }
     const sameOrigin=gamePost && req.headers.origin && (()=>{try{return new URL(req.headers.origin).host===req.headers.host;}catch{return false;}})();
     if (!(gamePost ? sameOrigin : authorized(req))) { rejected++; json(res,401,{error:'Unauthorized'}); req.resume(); return true; }
     if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) { rejected++; json(res,415,{error:'Content-Type must be application/json'}); req.resume(); return true; }
@@ -91,5 +93,16 @@ export function createSignalLink({ signalToken = process.env.SIGNAL_TOKEN, now =
     req.on('error',() => { if (!res.writableEnded) res.destroy(); });
     return true;
   }
-  return {handle, close() { control.close(); for (const client of [...clients,...gameClients]) client.end(); clients.clear(); seen.clear(); }};
+  return {
+    handle,
+    getGameState: () => gameState ? {...gameState} : null,
+    // Only the local inference bridge can publish these; partner ingress keeps its existing schema.
+    publishVision(event) {
+      if (!validVision(event) || !packetSending || event.session_id !== activeSession || event.encounter_id !== gameState?.encounter_id) return false;
+      const text = `data: ${JSON.stringify(event)}\n\n`;
+      for (const client of clients) { if (client.writableLength < 32768) client.write(text); else client.destroy(); }
+      return true;
+    },
+    close() { control.close(); for (const client of [...clients,...gameClients]) client.end(); clients.clear(); seen.clear(); }
+  };
 }
