@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ElevenLabs reaction test</title>
+  <link rel="stylesheet" href="/reaction-dashboard.css">
+</head>
+<body>
+<main>
+  <header><h1>elevenlabs / reaction monitor</h1><small>demo · simulated data · no API / mic</small></header>
+  <div class="toolbar"><button id="pause">pause</button><button id="reset">reset</button><span id="runState">running</span></div>
+  <div class="metrics" aria-label="Demo session metrics"><div>time: <b id="elapsed">02:00</b></div><div>events: <b id="count">4</b></div></div>
+  <div class="grid">
+    <section class="panel"><h2>audio</h2><div class="wave-wrap"><canvas id="wave" role="img" aria-label="Simulated audio waveform"></canvas></div><div class="axis"><span>-30s</span><span>-15s</span><span>now</span></div></section>
+    <section class="panel"><h2>reaction signal</h2><div id="reactionDisplay"><div class="lamp">●</div><b id="reactionTitle">waiting</b></div></section>
+  </div>
+  <section class="panel log"><h2>events</h2><pre id="eventRows" aria-label="Simulated event log"></pre></section>
+</main>
+<script type="module" src="/reaction-dashboard.mjs"></script>
+</body>
+</html>
