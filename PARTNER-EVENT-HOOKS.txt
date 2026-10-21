@@ -1,0 +1,88 @@
+PARTNER HOOK HANDOFF — MANUAL V1 + AUTOMATIC V2
+
+Keep using the existing URL, token and signal-scope.event.v1 payload.
+POST http://GAME_LAPTOP_IP:48080/signal-link/event
+Authorization: Bearer <existing SIGNAL_TOKEN>
+Content-Type: application/json
+
+Existing supported events: blink, jaw_clench, startle_flinch, reaction.
+Keep schema/id/event/source/measurement/emotion/label/value/created_at_ms/sent_at_ms
+exactly as agreed. No new session_id, encounter_id, confidence, quality, classifier
+version, or horror.reaction.v1 schema is required. The previous document asking
+for those changes is superseded by this one.
+
+The game receives the same validated hook and routes it to its internal director
+instead of immediately executing the old fixed effect. Three different opening
+encounters run with eight-second observation gaps. After that, one fresh hook
+allows the director to consider one next encounter, after the current encounter
+and cooldown finish. It retains only the newest pending hook, never a backlog.
+Duplicate IDs are ignored; pending hooks expire after15 seconds of local receipt.
+Disconnected input clears pending work; game-over cancels scheduled encounters.
+
+startle_flinch/reaction are treated as partner-reported reaction hooks for modest
+positive preference learning and longer recovery. blink/jaw_clench are neutral
+continuation hooks, not inferred fear. Value remains a control amount; the game
+does not invent confidence, signal quality, or a fear score from it. No EEG is
+processed in the game. Missing input does not mean no fear and does not escalate.
+
+Because existing JSON does not identify encounters, attribution uses the active
+or most recently finished encounter at browser receipt time. Observation gaps
+reduce ambiguity, but delayed deliveries can still be attributed incorrectly.
+Send fresh hooks promptly, do not replay old queued events. Optional internal
+game telemetry exists but your sender need not subscribe or change its contract.
+
+Default /simple.html uses this behavior. Begin a round before sending hooks.
+?mode=demo explicitly restores autonomous demo behavior and direct legacy effects.
+The existing signal-link/send.py remains usable for a manual transport check.
+
+Server startup: HOST=0.0.0.0 PORT=48080 npm run start:signal
+Receiver health: /signal-link/health
+Browser stream: /signal-link/events
+No token is printed in this document.
+
+AUTOMATIC THRESHOLD EVENTS — PARTNER V2 SUPPORTED
+
+Use the same URL and authentication token for signal-scope.event.v2.
+GET /signal-link/health advertises capabilities.automatic_threshold_events:
+{"schema":"signal-scope.event.v2","source":"threshold_detector","measurement":"threshold_crossing","event":"reaction","emotion":null,"quality":"unverified","detector_version":1}
+
+The exact seven-field detector metadata is retained. Canonical lowercase UUIDv4,
+integer timestamps, timestamp order/delta, crossing and provenance are validated.
+Unrelated top-level fields are stripped. First acceptance returns 202; duplicate
+IDs within 60 seconds return 200 with duplicate:true and are not dispatched.
+SSE has no replay. No credentials are sent to browser clients.
+
+V2 reaction means an unverified threshold crossing, not confirmed fright. It
+permits the director to schedule another encounter after the observation gap,
+without increasing learned fear preferences or inventing confidence. V1 manual
+behavior above remains compatible. Only the newest pending hook is retained.
+
+Partner: check this capability before enabling automatic mode. Keep your existing
+5-second sender cooldown, hysteresis/rearm, freshness checks and no-retry policy.
+If your sender needs a restart, do that between captures and re-enter its token.
+Our receiver does not manage your capture process or compute EEG features.
+
+GAME START / STOP CONTROL
+Space or Begin emits session_started; Stop Game / Escape, reset, game-over and
+round completion emit session_ended. Subscribe to authenticated GET
+/signal-link/game-events with the existing Bearer token, or poll authenticated
+GET /signal-link/game-state (current.packet_sending). True requests sending;
+false requests stopping. session_id identifies the round. On connection loss
+or current:null, stop sending. Reconcile game-state after subscribing/reconnecting.
+Your sender must implement this listener: the game cannot directly operate the
+other laptop's loopback API. On start use your existing automatic/start flow and
+fresh capability check; on end call your local automatic/stop. These controls do
+not change the incoming v1/v2 packet schemas.
+
+ACQUISITION CONTROL V1 — SUPERSEDES EARLIER GAME-EVENT LISTENER
+Use authenticated GET /signal-link/control/events and POST /signal-link/control/ack
+with the existing shared Bearer token. The exact acquisition_control capability
+is advertised by /signal-link/health. Stream heartbeats arrive every 5 seconds;
+connections begin idle and old commands are never replayed. Click a fresh Start
+after connecting. Start/Stop send signal-scope.control.v1 with UUIDv4 command and
+round IDs. The game displays validated matching ACK status, never inferred running.
+No command configures hardware or recording. Signal Scope must be locally enabled
+and must enforce the proposed bench-only mode, recording disabled, ownership,
+clock freshness, disconnect cleanup and bounded local-operation timeouts.
+The game-side implementation is tested; partner-device acquisition still needs
+an end-to-end Start / running ACK / Stop / stopped ACK check.

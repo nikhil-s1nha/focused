@@ -1,0 +1,212 @@
+EEG / SIGNAL SCOPE → HORROR GAME HANDOFF
+Code inspection: October 17, 2026
+Repository: focused; working branch vr-scene-expansion
+Game directory: haunted-room/
+
+1. WHAT IS IMPLEMENTED — AND WHAT IS NOT
+
+The game has two independent input paths. Neither performs EEG acquisition, filtering, feature extraction, or a validated fear/emotion classification.
+
+A. Continuous control input (existing game pipeline): sensor-side normalized control and quality → POST /api/signal → WebSocket /signals → SignalClient → Director and AdaptiveProfile → game pacing.
+
+B. Discrete Signal Scope integration added in this work: manual test/operator marker → authenticated POST /signal-link/event → same-server SSE /signal-link/events → SignalLinkAdapter → existing light, sound, and door functions.
+
+The requested partner ZIP was unavailable. We implemented the described event contract instead; we did not run or verify compatibility with the missing package itself. The supplied Python sender sends one event. It does NOT poll Signal Scope or acquire EEG.
+
+The current automatic desktop test page contains random lighting, feints, and attacks for visual testing. Those are not evidence that EEG is connected. The marker adapter only applies effects when the game phase is running and the page is not a spectator. For integration tests use /simple.html, enable sound, and click Begin night watch. The independent automatic preview on ?test=1 stays in the ready phase and can receive-but-skip marker events.
+
+2. ARCHITECTURE / OWNERSHIP
+
+Sensor laptop:
+- Owns hardware, acquisition, timestamps, filtering, artifact rejection, quality estimation, feature extraction, recording, and any model validation.
+- Owns the bridge from Signal Scope markers or derived continuous metrics to the contracts below.
+
+Game laptop:
+- Custom Node ESM HTTP server, Three.js/WebXR, npm; Node >=20.19.
+- One mounted Signal Scope receiver inside server.mjs. No second receiver on 48081 and no Vite proxy.
+- Browser only subscribes to relative same-origin URLs. Tokens are never in browser code.
+- Source labeling, input validation, freshness checks, event deduplication, cooldowns, diagnostics, and visual/audio effects.
+
+Quest:
+- Previously confirmed connected through USB adb reverse for TCP 48080; browser launch command succeeded.
+- URL: http://localhost:48080/simple.html?quest=1
+- Physical game viewing occurred, but sensor-driven end-to-end Quest effects have NOT been verified.
+- Headset is now unavailable. The desktop is the current test surface.
+
+3. STARTUP AND NETWORK
+
+From the repository:
+  cd haunted-room
+  npm ci
+  HOST=0.0.0.0 PORT=48080 npm run start:signal
+
+This starts the game and event receiver together. start:signal generates/reuses .env.signal-link with a random token, file mode 0600, unless SIGNAL_TOKEN is already set. That file is gitignored. Do not commit or copy it into a public handoff. .env.example is a placeholder, not automatically loaded by Node.
+
+Current desktop origin: http://127.0.0.1:48080
+Current en0 IPv4 observed: 20.20.20.179. Recheck when networks change:
+  ifconfig en0
+  ipconfig getifaddr en0
+
+Provisional sensor ingress:
+  http://20.20.20.179:48080/signal-link/event
+Health:
+  http://20.20.20.179:48080/signal-link/health
+Browser event stream:
+  /signal-link/events
+
+That interface address is not an RFC1918 private address. Do not assume it is reachable or safely private merely because it is assigned to Wi-Fi. Confirm the network with both operators; use an isolated trusted LAN for testing. Cross-laptop reachability has not been demonstrated. No router forwarding/public deployment is required.
+
+127.0.0.1 on the SENSOR laptop points to the sensor laptop, not the game laptop. The sender must use the game laptop's reachable address. Quest localhost works only while USB forwarding is in place:
+  adb reverse tcp:48080 tcp:48080
+
+4. DISCRETE EVENT CONTRACT
+
+POST /signal-link/event
+Headers:
+  Authorization: Bearer <SIGNAL_TOKEN shared privately>
+  Content-Type: application/json
+
+Example (replace timestamps at send time):
+{
+  "schema": "signal-scope.event.v1",
+  "id": "a-new-uuid-for-each-event",
+  "event": "startle_flinch",
+  "source": "manual_marker",
+  "measurement": "operator_annotation",
+  "emotion": null,
+  "label": "Startle / flinch",
+  "value": 0.7,
+  "created_at_ms": 1792278000000,
+  "sent_at_ms": 1792278000100
+}
+
+Required fields are exactly those shown; extra fields are rejected.
+- event: blink, jaw_clench, startle_flinch, reaction.
+- source: manual_test or manual_marker ONLY.
+- measurement: manual_test or operator_annotation.
+- emotion: null ONLY.
+- value: finite number 0..1; a control amount, NOT a probability of fear.
+- id: nonempty, <=128 characters, no control characters.
+- label: nonempty, <=160 characters, no control characters.
+- timestamps: nonnegative integer Unix MILLISECONDS.
+- Body limit: 8192 bytes. SIGNAL_TOKEN minimum: 24 characters.
+- Receiver adds received_at_ms using its own clock.
+
+A genuine automatic EEG classifier output cannot simply be relabeled manual_marker. Agree a separately versioned schema/provenance extension before using automatic physiological events on this route.
+
+Responses:
+202: new event accepted and broadcast.
+200 with duplicate:true: already seen; no repeat broadcast.
+401: absent/wrong token; 400: invalid payload; 413: too large;
+415: wrong content type; 503: token not configured; 405: wrong method.
+
+5. ACTUAL EFFECT MAPPINGS IN simple.html
+
+blink → existing fluorescent stutter, duration 0.30–0.85 s; cooldown 1.8 s.
+  Config computes strength .20–.65, but the current stutter handler uses fixed depth .8. Value currently changes duration, not flicker depth.
+jaw_clench → existing right-side breath cue; cooldown 3.5 s.
+  Requires sound enabled. Config computes strength .15–.45 and duration .5–1.2 s, but the current breath handler uses its existing fixed cue settings. Do not promise value-proportional sound strength yet.
+startle_flinch → existing left-door feint, opening .15–.45 of its range, duration 1–1.8 s, then close; cooldown 4.5 s.
+reaction → light reduction by .20–.60 of current baseline for .4–1.2 s, then restore; cooldown 3 s.
+
+There is also a global 800 ms cooldown between applied effects. These are manual event mappings, not a rule that more fear should cause more scares. A different main app mode has its own callback mappings; use simple.html for this handoff.
+
+6. CONTINUOUS INPUT CONTRACT
+
+POST /api/signal with Content-Type application/json:
+{
+  "type": "signal",
+  "source": "hardware",
+  "intensity": 0.4,
+  "signal_quality": 0.9,
+  "timestamp": 1792278000.1
+}
+
+source must be hardware, synthetic, or manual. intensity and signal_quality are finite 0..1. timestamp is a finite number; existing publishers use Unix SECONDS, unlike marker timestamps which use milliseconds.
+
+Browser selects Live stream to receive ws://<game-origin>/signals (wss when HTTPS). Manual proxy and simulated signal remain available. Default is manual, not live.
+
+PUBLISH_TOKEN, if configured, protects POST /api/signal with Bearer auth. It is separate from SIGNAL_TOKEN. Without PUBLISH_TOKEN the legacy continuous POST is unauthenticated; start:signal does not automatically configure it. Explicitly configure it for a shared network, and pass it only to the continuous sender. SSE/health reads do not require the ingestion token, so only use this arrangement on the agreed trusted network.
+
+Target proposal: publish derived values at ~10 Hz, not raw multichannel EEG. This matches the game's synthetic/manual ticker but is not an enforced server rate. Agree the actual rate, normalization, and units with the EEG team.
+
+Director defaults: smoothing 1.5 s; low threshold .30; high threshold .75; dwell 4 s; freshness 3 s; minimum quality .5; relief 8 s. Low input builds tension; high input produces relief. Confirm the meaning and polarity of the partner's metric BEFORE connecting it. A concentration or relaxation metric must not be blindly treated as fear.
+
+Freshness uses browser-local monotonic receipt time. Quality/dropout gates reduce trust in the continuous feed. The simple game's separate scare/profile logic and desktop demo can still generate encounters: this is NOT a global guarantee that all scares stop on missing EEG. If that behavior is required, add and test an explicit session-wide input-quality gate.
+
+AdaptiveProfile measures responses around lunge windows, initially with three calibration scares, then adjusts game heuristics. Its spike metric is explicitly a placeholder, not a validated EEG classifier. The latest build randomizes opening timing for horror variety; scientific calibration should specify and log its own reproducible protocol.
+
+7. RELIABILITY AND DIAGNOSTICS
+
+- Server dedup stores the last 2048 IDs; browser stores 512 IDs. Dedup is bounded and not durable across process/page restarts.
+- SSE is live-only, immediate, with 15 s heartbeats; no event IDs/replay backlog. Stalled clients are disconnected.
+- Browser reconnects automatically; no effect fires just because a stream reconnects.
+- Inactive, spectator, cooldown, or audio-disabled events are skipped, not queued.
+- Diagnostic panel shows connection, last event/source/ID/value, local receipt age, last action, received/applied/skipped counts, and errors; there is also an XR readout.
+- Connected != received != applied != visibly rendered. Confirm all stages separately.
+- No cross-machine timestamp subtraction should be called network latency without clock synchronization.
+- Receiver does not enforce a three-second event-age cutoff. The partner sender must discard stale events and avoid replaying failed deliveries.
+- Existing random visuals can coincide with operator effects. Use the panel's event ID and action counter to attribute a test, not appearance alone.
+
+8. WHAT WE NEED FROM THE EEG TEAM
+
+Send these concrete items:
+1. Hardware model, channel names/montage, reference, sample rate, acquisition software/version, and connection method.
+2. Current Signal Scope version and actual marker API/payload examples. Provide the missing partner sender/package if available.
+3. Decision: initial manual-marker bridge, continuous derived metrics, or both. Keep provenance truthful.
+4. At least 20 representative JSON packets (synthetic/de-identified is fine): normal, low-quality, missing data, movement artifact, and recovery. Include schema, units, timestamp units, and expected send rate.
+5. For every derived metric: name, formula/model version, input window and update cadence, normalization, baseline protocol, polarity, validation evidence, and known confounds. Explain exactly what intensity=0 and intensity=1 mean.
+6. Define signal_quality: range, artifact criteria, thresholds, stale/contact-loss behavior, and whether quality measures EEG usability rather than model confidence.
+7. Sender behavior: unique IDs, start-from-now markers, no startup replay, bounded delivery, stale-event dropping, reconnect handling. Proposed marker policy from brief: poll every200 ms, discard >3 s old markers, drop failed deliveries. This policy is NOT implemented by our one-shot send.py.
+8. Network details and a reachable sender machine on the same agreed LAN; privately exchange SIGNAL_TOKEN and, if applicable, PUBLISH_TOKEN. Never put tokens into report/screenshots/source control.
+9. Recording alignment: session IDs, clock-sync method, how game lunge/event times should be delivered back to acquisition, and desired export format. There is no completed authenticated game→sensor annotation callback in this integration.
+10. A named operator and time for cross-laptop verification. Quest verification requires the headset to be available again.
+
+Do not port raw filtering/classification into the game just to make the bridge work. Keep acquisition on the sensor laptop, implement a thin sender adapter, and first establish manual transport before attaching a derived metric.
+
+9. BRING-UP CHECKLIST FOR THE TEAM
+
+A. Start the game server as above; check /signal-link/health returns enabled:true.
+B. Open /simple.html, enable sound, Begin night watch, expand Signal Scope/operator link. Use Manual proxy initially; marker SSE does not require Live stream.
+C. On sensor laptop, set SIGNAL_TOKEN privately and set SIGNAL_URL to the reachable ingress URL. Copy signal-link/send.py and run:
+  python3 signal-link/send.py --event blink --value 0.7
+D. Match the sender UUID to the panel; verify received and applied increment and the lamp flickers. Send jaw_clench only with sound enabled. Wait beyond cooldowns between tests.
+E. Repeat an identical payload/ID: expect duplicate:true and no second effect. Send wrong token/invalid event and verify rejection.
+F. Disconnect/reconnect the browser: old events must not replay. Stop input and verify intended fallback. Repeat on Quest later.
+G. For continuous data, configure PUBLISH_TOKEN; POST a synthetic-labeled contract packet first, select Live stream, and check quality/freshness. Only then attach hardware-derived packets with agreed semantics.
+
+10. FILES TO PORT / REVIEW
+
+Backend: server.mjs, signal-link/receiver.mjs, signal-link/send.py,
+scripts/start-signal-link.mjs, .env.example, package.json start:signal entry,
+repository .gitignore entry for .env.signal-link.
+Browser: public/signal-link/config.mjs, adapter.mjs, panel.mjs;
+public/simple-app.mjs integration callbacks; public/simple.html panel;
+public/app.mjs integration for the alternative studio.
+Continuous: public/signal-client.mjs, public/director.mjs,
+server signal sanitizer/relay, public/simple/calibration.mjs.
+Tests: test/signal-link-receiver.test.mjs, signal-link-adapter.test.mjs,
+relay.test.mjs, spectate-relay.test.mjs; existing signal/director/profile tests.
+
+Do not copy only a visual screenshot or assume GitHub already contains this work. This task has uncommitted integration/game modifications. Coordinate a reviewed commit/branch export before the other team pulls. Never include .env.signal-link or node_modules in a portable archive.
+
+11. VERIFIED STATUS / LIMITS
+
+Current live health inspection: enabled:true, one client, zero accepted events and no last event at inspection time. This proves configuration and subscription, not sensor delivery.
+Browser adapter tests have previously passed (validation, fixed callback invocation, duplicates, inactive skips, cooldowns, reconnect, hot-reload cleanup). Fresh combined receiver, adapter, continuous relay, and spectator relay run: 15/15 tests passed. Includes real HTTP authentication/validation, immediate SSE, duplicate suppression, and reconnect without replay. Command: node --test test/signal-link-receiver.test.mjs test/signal-link-adapter.test.mjs test/relay.test.mjs test/spectate-relay.test.mjs. These automated checks do not substitute for cross-laptop or rendered Quest verification.
+Physical Quest USB forwarding and browser launch were verified earlier. No cross-laptop Signal Scope event delivery or sensor-triggered Quest effect has been demonstrated. Actual EEG classification/quality validity, sender marker-follow mode, and game→sensor event synchronization are pending.
+
+COPY-PASTE SENSOR-TEAM SUMMARY
+Framework: Three.js/WebXR, custom Node ESM server, npm; Node >=20.19.
+Game startup: cd haunted-room && HOST=0.0.0.0 PORT=48080 npm run start:signal
+Game origin/port: http://127.0.0.1:48080 on game laptop.
+Quest method: USB adb reverse tcp:48080 tcp:48080; headset currently unavailable.
+Partner IPv4 observed: 20.20.20.179; recheck and validate trusted-LAN reachability.
+Receiver ingress: http://20.20.20.179:48080/signal-link/event
+Browser stream: /signal-link/events on game origin.
+Auth: SIGNAL_TOKEN configured locally; privately share; token omitted here.
+Mappings: blink→flicker; jaw_clench→breath; startle_flinch→left-door feint; reaction→light sag.
+Continuous option: POST /api/signal → /signals; separate PUBLISH_TOKEN; agreed normalized metric required.
+Cross-laptop test: pending.
+Quest sensor-effect test: pending.
+Blockers: partner marker API/sender, agreed metric semantics/quality, private token exchange, LAN verification, and coordinated end-to-end test.

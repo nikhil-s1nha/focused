@@ -4,6 +4,11 @@ A two-minute adaptive haunted room for the Quest 3S browser. Built from the requ
 
 ## Start here
 
+For the current game, open `/simple.html`. The graph input page is `/roboflow.html`;
+see [ROBOFLOW-SETUP.txt](ROBOFLOW-SETUP.txt) for model/Workflow setup and the local
+detector option. The original continuous-signal prototype is still at `/` and
+described below.
+
 ```sh
 cd haunted-room
 npm ci
@@ -57,7 +62,16 @@ Replace SCENE_HOST with the scene laptop's reachable address. On the Pi, 127.0.0
 
 ## Quest 3S — prove this before polishing art
 
-### Quick USB route
+### One-command route (recommended)
+
+```sh
+npm run quest            # add `-- --port 9000` for another port
+npm run quest:record     # also records the headset view (needs scrcpy)
+```
+
+First time only: enable Developer Mode in the Meta Horizon phone app (needs a developer account), plug in USB-C, put the headset on, accept **Allow USB debugging** (tick Always allow). Then the script installs `adb` via Homebrew if missing, starts the scene server if it is not running, waits for an authorized headset, runs `adb reverse`, opens Quest Browser on the page, and re-applies everything if you unplug and replug. Ctrl+C removes the forward and stops any server it started. It prints a specific message for no device, unauthorized, or offline. `/healthz` on the server reports that it is up. This path is untested on a physical headset so far.
+
+### Manual USB route
 
 1. Enable Quest developer mode, install Android platform tools, connect the headset by USB and authorize debugging yourself in the headset.
 2. `adb devices` should list it as `device`.
@@ -82,6 +96,21 @@ npm start
 ```
 
 Open `https://YOUR-CERTIFICATE-HOSTNAME:8443` in Quest Browser. The page chooses **wss://…/signals** automatically. A trusted HTTPS reverse proxy must forward both normal HTTP and WebSocket upgrades. Never commit certificate keys or tokens. The Quest's network route is independent of a Mac–Pi Ethernet link; venue Wi-Fi may isolate clients.
+
+## Show the headset view on a TV (HDMI)
+
+The simple game has a spectator page that replays what the VR player sees. It
+renders the same room on the laptop from the headset's live head pose and scare
+events, so it is full quality with no video capture or lag from casting.
+
+1. Plug the laptop into the TV with HDMI. On a Mac: System Settings, Displays, set the TV to **Extend** (or mirror).
+2. With the server running (`npm run quest` or `npm start`), open **http://127.0.0.1:8080/simple.html?spectate=1** in Chrome on the laptop.
+3. Drag that window onto the TV and press **F** for fullscreen.
+4. Put the headset on and play. The TV shows the player's view, doors and scares as they happen. Tick **Sound** on the TV page if you want the room's audio from the TV speakers.
+
+A TV page opened mid-session catches up to the current state and reconnects by itself. Only head pose, a few scare-event fields and the session phase are relayed through `/spectate`; no sensor data. It follows the server's `HOST`/`PORT` settings, so for another machine use `HOST=0.0.0.0 npm start` on a trusted network only.
+
+Not covered: the TV page mirrors the head pose, so the picture turns as the player's head turns (that is the point), and it is a re-render, not a recording of the headset's pixels. Meta's own casting or `scrcpy` are alternatives if you want the headset's actual video.
 
 ## Director tuning
 
@@ -123,3 +152,19 @@ Actual Quest acceptance remains manual:
 0:00 — show input/source/HUD, enter VR and begin. 0:15 — use low manual input or the actual available source; explain it honestly. 0:45 — show lighting/fog/shadow change. 1:00 — hold high input and show RELIEF. 1:25 — stop the synthetic/live publisher and show WAIT. 1:40 — restore input. 2:00 — show the ending. Capture the headset's view; no slide deck is needed.
 
 References: [Three.js VR](https://threejs.org/manual/pages/how-to-create-vr-content.html), [WebXR secure context](https://developer.mozilla.org/en-US/docs/Web/API/WebXR_Device_API), [Android local server forwarding](https://developer.android.com/develop/ui/views/layout/webapps/access-local-server).
+
+## FNAF-style loop (wired in app.mjs)
+
+Begin, then: the Attendant creeps along the left wall and only moves while it is
+not in the centre of your view (26 degree focus cone) and its camera zone is not
+being watched. The corridor ghost is the opposite: ignore it and it charges,
+stare it down and it drains. Cameras (C, V/Tab, 1-4 buttons), the floodlight
+(hold L / VR grip) and the door seal (X) all drain power. At 0% the lights die,
+the music box winds down, eyes appear, then a scare. A scare is a ~0.8 s
+telegraph (duck + one cut-to-dark), the lunge + stinger, then a "caught" summary.
+Desktop walking is disabled while a session runs. Comfort rules: the camera is
+never moved, no flicker above ~2.5 Hz, sound is opt-in.
+
+VR controls (emulation-tested only for session entry and a generic select; NOT
+yet verified per-control, and never on a physical Quest): trigger = panels / CRT
+(cycles cameras) / door / props, A/X sound, B/Y cameras, grip floodlight.

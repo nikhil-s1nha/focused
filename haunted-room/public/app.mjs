@@ -1,8 +1,56 @@
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
-import { Director, validSignal } from "./director.mjs";
-const $ = (id) => document.getElementById(id),
-  director = new Director();
+import { installSignalLink } from "./signal-link/adapter.mjs";
+import { mountSignalLinkPanel } from "./signal-link/panel.mjs";
+import { Director } from "./director.mjs";
+import { SignalClient } from "./signal-client.mjs";
+import { AudioEngine } from "./audio-engine.mjs";
+import { MusicBox } from "./music-box.mjs";
+import { createEnvironment } from "./environment.mjs";
+import { createMaterialLibrary } from "./textures.mjs";
+import { createAtmosphere, ATMOSPHERES } from "./atmosphere.mjs";
+import { createAnimatronic } from "./animatronic.mjs";
+import { createGhost } from "./ghost.mjs";
+import { createVolumetricCone, createDustMotes } from "./volumetrics.mjs";
+import { createMonitor } from "./monitor.mjs";
+import {
+  FnafSession,
+  KEYMAP,
+  MODE_LABELS,
+  applyPress,
+} from "./fnaf-session.mjs";
+import { createFnafWorld } from "./fnaf-scene.mjs";
+import { CAMERAS } from "./fnaf/core/data.mjs";
+import { CAMS2 } from "./fnaf/modes/fnaf2.mjs";
+import { CAMS3 } from "./fnaf/modes/fnaf3.mjs";
+import { adaptiveMultiplier } from "./adaptive-pacing.mjs";
+import { Haunt } from "./haunt.mjs";
+import { PowerSystem } from "./power.mjs";
+import {
+  ATTENDANT_HOME,
+  ATTENDANT_NODE_COUNT,
+  ATTENDANT_PATH,
+  BLACKOUT_SCARE_DELAY,
+  BlackoutTimeline,
+  DIFFICULTY,
+  JumpscareFlow,
+  PhantomSounds,
+  SessionStats,
+  TapeScript,
+  attendantZone,
+  clampAi,
+  difficultyFor,
+  entityObserved,
+  focusObserved,
+  formatEta,
+  ghostZone,
+  powerTier,
+} from "./session-flow.mjs";
+
+const $ = (id) => document.getElementById(id);
+const director = new Director();
+
+// ---------- renderer / scene / rig ----------
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#0a100f");
 scene.fog = new THREE.FogExp2(0x18221e, 0.055);
@@ -22,9 +70,13 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType("local-floor");
+renderer.xr.setFoveation(0.666);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 $("viewport").appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
+window.__renderer = renderer; // read-only hook for the XR test harness
+
+// ---------- lights owned by the app (atmosphere drives their values) ----------
 const ambient = new THREE.HemisphereLight(0x99b1a2, 0x10130e, 0.65);
 scene.add(ambient);
 const lamp = new THREE.PointLight(0xf0d6a0, 20, 12, 2);
@@ -33,295 +85,463 @@ scene.add(lamp);
 const windowLight = new THREE.PointLight(0x759fa4, 8, 9, 2);
 windowLight.position.set(2.8, 1.8, -2);
 scene.add(windowLight);
-const mats = {
-  wall: new THREE.MeshStandardMaterial({ color: 0x394039, roughness: 1 }),
-  wood: new THREE.MeshStandardMaterial({ color: 0x3a2c22, roughness: 0.9 }),
-  floor: new THREE.MeshStandardMaterial({ color: 0x38372c, roughness: 0.95 }),
-  dark: new THREE.MeshStandardMaterial({ color: 0x080e0d, roughness: 1 }),
-  metal: new THREE.MeshStandardMaterial({
+const fixture = new THREE.Mesh(
+  new THREE.ConeGeometry(0.36, 0.22, 16, 1, true),
+  new THREE.MeshStandardMaterial({
     color: 0x55594a,
     roughness: 0.7,
     metalness: 0.25,
   }),
-};
-function box(x, y, z, w, h, d, mat) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  m.position.set(x, y, z);
-  scene.add(m);
-  return m;
-}
-// Fixed room geometry. Effects never shift the floor or the player.
-box(0, -0.08, -1, 7, 0.16, 9, mats.floor);
-box(-3.5, 1.8, -1, 0.15, 3.6, 9, mats.wall);
-box(3.5, 1.8, -1, 0.15, 3.6, 9, mats.wall);
-box(0, 3.6, -1, 7, 0.15, 9, mats.dark);
-box(0, 1.8, 3.5, 7, 3.6, 0.15, mats.wall);
-box(-2.25, 1.8, -5.5, 2.5, 3.6, 0.15, mats.wall);
-box(2.25, 1.8, -5.5, 2.5, 3.6, 0.15, mats.wall);
-box(0, 3.25, -5.5, 2, 0.7, 0.15, mats.wall);
-box(0, 1.4, -5.65, 2, 2.8, 0.12, mats.dark);
-for (const x of [-1.08, 1.08]) box(x, 1.45, -5.38, 0.14, 2.9, 0.2, mats.wood);
-box(0, 2.91, -5.38, 2.3, 0.14, 0.2, mats.wood);
-for (let i = 0; i < 18; i++)
-  box(-3.3 + i * 0.39, 0.009, -1, 0.012, 0.009, 8.8, mats.dark);
-for (const x of [-3.38, 3.38]) {
-  box(x, 0.16, -1, 0.08, 0.32, 9, mats.wood);
-  for (let z = -5; z < 3.5; z += 1.25)
-    box(x, 1.05, z, 0.1, 1.5, 0.04, mats.wood);
-  box(x, 1.8, -1, 0.1, 0.08, 9, mats.wood);
-}
-// A narrow window, a dusty cabinet and an empty chair.
-box(3.39, 2, -2, 0.03, 1.7, 1.3, mats.dark);
-for (const z of [-2.66, -2, -1.34])
-  box(3.35, 2, z, 0.08, 1.8, 0.055, mats.wood);
-box(3.35, 2, -2, 0.08, 0.06, 1.3, mats.wood);
-box(-2.55, 0.65, -3.7, 1.2, 1.3, 0.6, mats.wood);
-box(-2.55, 1.34, -3.7, 1.3, 0.08, 0.7, mats.metal);
-for (const x of [-2.85, -2.25]) box(x, 0.7, -3.385, 0.5, 1, 0.035, mats.floor);
-const chair = new THREE.Group();
-chair.position.set(1.8, 0, -3.7);
-chair.rotation.y = -0.3;
-scene.add(chair);
-function chairPart(x, y, z, w, h, d) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mats.wood);
-  m.position.set(x, y, z);
-  chair.add(m);
-}
-chairPart(0, 0.48, 0, 0.62, 0.1, 0.62);
-for (const x of [-0.24, 0.24])
-  for (const z of [-0.24, 0.24]) chairPart(x, 0.23, z, 0.065, 0.46, 0.065);
-chairPart(0, 1, -0.27, 0.62, 0.85, 0.08);
-const fixture = new THREE.Mesh(
-  new THREE.ConeGeometry(0.36, 0.22, 16, 1, true),
-  mats.metal,
 );
 fixture.position.copy(lamp.position);
 scene.add(fixture);
-box(0, 3.2, -1, 0.02, 0.6, 0.02, mats.dark);
-const figure = new THREE.Group(),
-  silhouette = new THREE.MeshBasicMaterial({
-    color: 0x020403,
-    transparent: true,
-    opacity: 0,
-  });
-const body = new THREE.Mesh(new THREE.ConeGeometry(0.28, 1.4, 12), silhouette);
-body.position.y = 0.8;
-figure.add(body);
-const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 12), silhouette);
-head.position.y = 1.61;
-figure.add(head);
-figure.position.set(0, 0, -5.3);
-scene.add(figure);
-// In-world text and tracked-controller targets, independent of DOM overlays.
-function panel(width, height, canvasWidth, canvasHeight) {
-  const canvas = document.createElement("canvas");
-  canvas.width = canvasWidth;
-  canvas.height = canvasHeight;
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(width, height),
-    new THREE.MeshBasicMaterial({
-      map: texture,
-      transparent: true,
-      side: THREE.DoubleSide,
-    }),
-  );
-  return { canvas, ctx: canvas.getContext("2d"), texture, mesh };
-}
-const hud = panel(1.65, 0.82, 1024, 512);
-hud.mesh.position.set(-1.3, 1.95, -1.25);
-hud.mesh.rotation.y = 0.25;
-scene.add(hud.mesh);
-function target(text, x, action) {
-  const p = panel(0.65, 0.16, 650, 160);
-  p.ctx.fillStyle = "#243429";
-  p.ctx.fillRect(0, 0, 650, 160);
-  p.ctx.strokeStyle = "#9aad86";
-  p.ctx.strokeRect(3, 3, 644, 154);
-  p.ctx.fillStyle = "#e0e9d3";
-  p.ctx.font = "38px sans-serif";
-  p.ctx.textAlign = "center";
-  p.ctx.fillText(text, 325, 95);
-  p.texture.needsUpdate = true;
-  p.mesh.position.set(x, 1.38, -1.05);
-  p.mesh.userData.action = action;
-  scene.add(p.mesh);
+
+// ---------- world: environment, entities, cinematics ----------
+const materialLibrary = createMaterialLibrary(THREE);
+const environment = createEnvironment(THREE, scene, {
+  materials: materialLibrary.materials,
+});
+const atmosphere = createAtmosphere(THREE, {
+  scene,
+  ambient,
+  lamp,
+  windowLight,
+});
+atmosphere.setDomOverlay(true);
+// The Attendant is rebuilt (cheaply) whenever the hunt model retreats or the
+// session restarts, so its mesh always matches the coordinator's waypoint.
+// Its lunge targets the head position captured at (re)build time.
+let attendant = null;
+let attendantWp = 0; // haunt waypoint this instance was built at
+function headSpot() {
+  const p = new THREE.Vector3();
+  camera.updateWorldMatrix(true, false);
+  camera.getWorldPosition(p);
   return p;
 }
-let audio = null,
-  audioEnabled = false,
-  mode = "manual",
-  lastSignal = null,
-  receivedAt = -Infinity,
-  socket = null,
-  retryTimer = null,
-  socketGeneration = 0,
-  retryMs = 500,
-  connection = "disconnected",
-  lastTime = performance.now(),
-  lastHud = 0,
-  current = {
-    state: "WAIT",
-    phase: "ready",
-    source: "manual",
-    intensity: 0.5,
-    tension: 0.12,
-    quality: 1,
-    remaining: 120,
-    fresh: true,
-  };
-function begin() {
-  director.start();
-  $("position").disabled = true;
-  lastSignal = null;
-  receivedAt = -Infinity;
-  $("sessionState").textContent =
-    "The room is listening. You can reset at any time.";
+function buildAttendant(wp = 0) {
+  attendant?.dispose();
+  const start = wp === 0 ? ATTENDANT_HOME : ATTENDANT_PATH[wp - 1];
+  const head = headSpot();
+  attendant = createAnimatronic(THREE, scene, {
+    x: start.x,
+    z: start.z,
+    waypoints: ATTENDANT_PATH.slice(wp),
+    safeRadius: 0.9,
+    playerX: head.x,
+    playerZ: head.z,
+  });
+  attendantWp = wp;
 }
-function reset() {
-  director.reset();
-  $("position").disabled = false;
-  lastSignal = null;
-  receivedAt = -Infinity;
-  $("sessionState").textContent = "Ready when you are.";
-}
-function makeAudio() {
-  const context = new AudioContext(),
-    gain = context.createGain(),
-    panner = context.createPanner();
-  panner.panningModel = "HRTF";
-  panner.distanceModel = "inverse";
-  panner.refDistance = 2;
-  panner.maxDistance = 15;
-  gain.gain.value = 0;
-  panner.connect(context.destination);
-  gain.connect(panner);
-  for (const frequency of [56, 84.3]) {
-    const osc = context.createOscillator();
-    osc.type = "sine";
-    osc.frequency.value = frequency;
-    osc.connect(gain);
-    osc.start();
-  }
-  return { context, gain, panner };
-}
+buildAttendant(0);
+const meshWaypoint = () => attendantWp + attendant.waypointIndex + 1;
+const ghost = createGhost(THREE, scene);
+const monitor = createMonitor(THREE, renderer, scene, {
+  active: false,
+  xrSafe: true, // RT feed also renders in VR (xr is disabled around it, see render loop)
+});
+const haunt = new Haunt({
+  blackoutDelay: BLACKOUT_SCARE_DELAY,
+  entities: [
+    { id: "attendant", kind: "stalker", aggression: 5, waypoints: ATTENDANT_NODE_COUNT },
+    { id: "ghost", kind: "charger", aggression: 5 },
+  ],
+});
+const power = new PowerSystem();
+const flow = new JumpscareFlow();
+const blackoutTimeline = new BlackoutTimeline();
+const stats = new SessionStats();
+const tape = new TapeScript();
+const phantom = new PhantomSounds();
+// Floodlight: one spot light that always exists (intensity 0 when off) so the
+// light count never changes at runtime (no shader recompiles on Quest).
+const floodlight = new THREE.SpotLight(0xfff0d0, 0, 16, Math.PI / 8, 0.45, 1.6);
+const floodTarget = new THREE.Object3D();
+floodTarget.position.set(0, 0, -1);
+floodlight.add(floodTarget);
+floodlight.target = floodTarget;
+camera.add(floodlight);
+floodlight.position.set(0.08, -0.1, 0);
+const lampCone = createVolumetricCone(THREE, {
+  radiusBottom: 1.5,
+  height: 2.7,
+  color: 0xf0d6a0,
+  anglePower: 5,
+  attenuation: 3.4,
+});
+lampCone.mesh.position.set(0, 2.72, -1);
+scene.add(lampCone.mesh);
+const lampMotes = createDustMotes(THREE, { count: 120, radiusBottom: 1.4, height: 2.6 });
+lampCone.mesh.add(lampMotes.points);
+
+// ---------- audio ----------
+const audio = new AudioEngine();
+const musicBox = new MusicBox();
+let audioEnabled = false;
 async function setSound(value) {
   try {
-    if (value) {
-      audio ??= makeAudio();
-      await audio.context.resume();
-    }
+    await audio.setEnabled(value);
+    await musicBox.setEnabled(value);
     audioEnabled = value;
-    if (audio && !value)
-      audio.gain.gain.setTargetAtTime(0, audio.context.currentTime, 0.1);
     $("sound").checked = value;
+    if (value) applyVolume();
   } catch (e) {
     audioEnabled = false;
     $("sound").checked = false;
     $("error").textContent = `Audio unavailable: ${e.message}`;
   }
 }
-const startTarget = target("BEGIN / RESET", -0.4, () => {
-  if (director.phase === "running") reset();
+function applyVolume() {
+  const v = +$("volume").value;
+  audio.setVolume(v);
+  musicBox.setVolume(v * 0.6);
+  $("volumeValue").textContent = v.toFixed(2);
+}
+
+// ---------- signal input ----------
+let connectionStatus = { connection: "idle", error: null };
+const client = new SignalClient({
+  onSignal(message, receiptMs) {
+    director.receive(message, receiptMs / 1000);
+  },
+  onStatus(status) {
+    connectionStatus = status;
+    $("error").textContent = status.error ?? "";
+  },
+});
+client.setMode($("source").value);
+client.setManualValue(+$("intensity").value);
+client.setManualQuality(+$("quality").value);
+
+// ---------- session flow ----------
+let current = director.snapshot(performance.now() / 1000);
+let summaryShown = false;
+let endHandled = false;
+let powerScale = 1; // power is tuned for 120 s; stretch/shrink with the duration
+let hudNote = { text: "", until: 0 };
+let floodDesk = false; // L key / button held
+let floodVR = false; // grip held
+let doorSealed = false;
+let windLocked = false; // blackout sequence owns the music box wind
+const scratch = new THREE.Vector3();
+
+function notice(text, { alert = false, seconds = 4 } = {}) {
+  hudNote = { text, until: performance.now() / 1000 + seconds };
+  const el = $("caption");
+  el.textContent = text;
+  el.classList.toggle("alert", alert);
+  el.classList.remove("hidden");
+  clearTimeout(notice.timer);
+  notice.timer = setTimeout(() => el.classList.add("hidden"), seconds * 1000);
+}
+function cue(name, opts) {
+  try {
+    audio.cue(name, opts);
+  } catch {
+    /* audio is optional */
+  }
+}
+function applyAggression() {
+  haunt.setAggression(clampAi($("aiLevel").value));
+}
+function resetWorld() {
+  haunt.reset();
+  power.reset();
+  flow.reset();
+  blackoutTimeline.reset();
+  blackoutOn = false;
+  blackoutClock = 0;
+  tape.reset();
+  phantom.reset();
+  stats.reset();
+  if (attendant.jumping || meshWaypoint() !== 0 || attendant.stage !== 0) buildAttendant(0);
+  attendant.setBlackout(false);
+  attendant.setStage(0);
+  ghost.setState("hidden");
+  ghost.setBlackout(false);
+  monitor.setSignalLost(false);
+  monitor.setActive(false);
+  monitor.selectCamera(0);
+  atmosphere.setBlackout(false);
+  musicBox.setWind(1);
+  musicBox.setMuffled(false);
+  windLocked = false;
+  floodDesk = floodVR = false;
+  setDoor(false, true);
+  endHandled = false;
+  hudNote = { text: "", until: 0 };
+  $("caption").classList.add("hidden");
+}
+function begin() {
+  director.config.duration = +$("duration").value;
+  director.start();
+  resetWorld();
+  buildAttendant(0); // re-captures the player's head position for the lunge
+  haunt.start();
+  applyAggression();
+  stats.ai = clampAi($("aiLevel").value);
+  powerScale = 120 / director.config.duration;
+  power.start();
+  summaryShown = false;
+  $("position").disabled = true;
+  $("overlay").classList.add("hidden");
+  $("summaryPanel").classList.add("hidden");
+  $("pause").textContent = "Pause";
+  setState("The room is listening. You can reset at any time.");
+  if (!renderer.xr.isPresenting) $("crosshair").classList.remove("hidden");
+}
+function reset() {
+  director.reset();
+  resetWorld();
+  summaryShown = false;
+  $("position").disabled = false;
+  $("overlay").classList.remove("hidden");
+  $("summaryPanel").classList.add("hidden");
+  $("crosshair").classList.add("hidden");
+  $("interactHint").classList.add("hidden");
+  $("pause").textContent = "Pause";
+  setState("Ready when you are.");
+}
+function togglePause() {
+  const now = performance.now() / 1000;
+  if (director.phase !== "running") return begin();
+  if (director.paused) {
+    director.resume(now);
+    power.start();
+    $("pause").textContent = "Pause";
+    toast("Resumed");
+  } else {
+    director.pause(now);
+    power.stop();
+    $("pause").textContent = "Resume";
+    toast("Paused");
+  }
+}
+function setState(text) {
+  $("sessionState").textContent = text;
+}
+let toastTimer = 0;
+function toast(text) {
+  const el = $("toast");
+  el.textContent = text;
+  el.classList.add("hidden");
+  void el.offsetWidth; // restart the fade animation
+  el.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add("hidden"), 2600);
+}
+
+// ---------- end-of-session summary ----------
+const fnafSummary = () => stats.toJSON(power.getState().percent);
+function sessionExport() {
+  return { ...director.getSession(), fnaf: fnafSummary() };
+}
+function showSummary() {
+  const s = director.getSession();
+  const f = fnafSummary();
+  const stat = Object.entries(s.encounterStats)
+    .filter(([, v]) => v.count > 0)
+    .map(
+      ([id, v]) =>
+        `<tr><td>${id}</td><td>${v.count}</td><td>${v.avgResponse > 0 ? "+" : ""}${v.avgResponse.toFixed(3)}</td></tr>`,
+    )
+    .join("");
+  const headline =
+    s.endedReason === "caught"
+      ? `<p class="caught"><strong>CAUGHT.</strong> ${f.jumpscare?.cause ?? ""}</p>`
+      : s.endedReason === "completed"
+        ? "<p><strong>You survived the night.</strong></p>"
+        : "<p>Session ended.</p>";
+  $("summaryContent").innerHTML = `
+    ${headline}
+    <p>Peak tension <strong>${s.peakTension.toFixed(2)}</strong> over ${Math.round(s.elapsed)}s.</p>
+    <table class="summary-table">
+      <tr><th>Survival</th><th></th></tr>
+      <tr><td>Ended by</td><td>${f.jumpscare ? `${f.jumpscare.entity} (${f.jumpscare.kind}) at ${f.jumpscare.atElapsed}s` : s.endedReason}</td></tr>
+      <tr><td>Power at end</td><td>${f.powerAtEndPercent}%</td></tr>
+      <tr><td>Blackout</td><td>${f.blackoutAtElapsed == null ? "none" : `at ${f.blackoutAtElapsed}s`}</td></tr>
+      <tr><td>Attendant moves</td><td>${f.entityMoves.attendant}</td></tr>
+      <tr><td>Camera uptime</td><td>${f.cameraUptimeSeconds}s (${f.cameraUptimePercent}%), ${f.cameraSwitches} switches</td></tr>
+      <tr><td>Floodlight</td><td>${f.floodlightSeconds}s</td></tr>
+      <tr><td>AI level</td><td>${f.aiLevel}</td></tr>
+    </table>
+    <table class="summary-table">
+      <tr><th>State</th><th>Seconds</th></tr>
+      ${Object.entries(s.timeInState)
+        .map(([k, v]) => `<tr><td>${k}</td><td>${v.toFixed(1)}</td></tr>`)
+        .join("")}
+    </table>
+    ${stat ? `<table class="summary-table"><tr><th>Encounter</th><th>Count</th><th>Avg response</th></tr>${stat}</table>` : "<p>No encounters fired.</p>"}
+    <p class="console-note">Derived control values only; no raw sensor data is stored.</p>`;
+  $("summaryPanel").classList.remove("hidden");
+}
+function download(name, text) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ---------- creator presets ----------
+const PRESET_KEY = "quietroom-preset";
+const PRESET_FIELDS = [
+  "low",
+  "high",
+  "duration",
+  "atmosphere",
+  "volume",
+  "position",
+  "scenario",
+  "aiLevel",
+];
+const PRESET_TOGGLES = ["sound", "lighting", "fog", "shadow"];
+function collectPreset() {
+  const p = {};
+  for (const f of PRESET_FIELDS) p[f] = $(f).value;
+  for (const t of PRESET_TOGGLES) p[t] = $(t).checked;
+  return p;
+}
+function applyPreset(p) {
+  if (!p || typeof p !== "object") return false;
+  for (const f of PRESET_FIELDS)
+    if (f in p && $(f)) {
+      $(f).value = p[f];
+      $(f).dispatchEvent(new Event("change"));
+    }
+  for (const t of PRESET_TOGGLES)
+    if (t in p && $(t) && t !== "sound") $(t).checked = !!p[t];
+  applyVolume();
+  return true;
+}
+
+// ---------- power / cameras / floodlight / door ----------
+function setCameras(up) {
+  if (up && power.getState().blackout) {
+    notice("No power. The monitor is dead.", { alert: true });
+    return;
+  }
+  if (monitor.isActive() === up) return;
+  monitor.setActive(up);
+  power.setLoad("monitor", up);
+  cue(up ? "monitorUp" : "monitorDown");
+}
+function selectCamera(i) {
+  if (!monitor.isActive()) return;
+  const n = monitor.getCamera().count;
+  monitor.selectCamera(((i % n) + n) % n);
+  stats.cameraSwitches++;
+  cue("cameraSwitch");
+}
+function nextCamera() {
+  if (!monitor.isActive()) return;
+  selectCamera(Math.max(0, monitor.getCamera().index) + 1);
+}
+function toggleCameras() {
+  setCameras(!monitor.isActive());
+}
+function setDoor(sealed, silent = false) {
+  if (sealed && (power.getState().blackout || director.phase !== "running")) {
+    if (!silent) notice(director.phase !== "running" ? "Begin first." : "No power. The seal will not hold.", { alert: true });
+    return;
+  }
+  if (doorSealed === sealed) return;
+  doorSealed = sealed;
+  power.setLoad("door", sealed);
+  environment.creakDoor(sealed ? -2 : 1.1);
+  if (!silent) {
+    cue(sealed ? "thump" : "knock", { position: { x: 0.95, z: -5.0 }, intensity: 0.6 });
+    notice(sealed ? "Door sealed. The corridor cannot reach you. Power draining." : "Door open.");
+  }
+}
+const toggleDoor = () => setDoor(!doorSealed);
+function floodOn() {
+  return (
+    (floodDesk || floodVR) &&
+    director.phase === "running" &&
+    !director.paused &&
+    !power.getState().blackout
+  );
+}
+
+// ---------- UI wiring ----------
+// Overlay buttons are re-rendered for FNAF modes, so Begin is delegated.
+$("overlay").addEventListener("click", (e) => {
+  if (e.target?.id !== "start") return;
+  if (fnaf) fnafBegin();
   else begin();
 });
-const soundTarget = target("SOUND: OFF", 0.4, () => setSound(!audioEnabled));
-const targets = [startTarget.mesh, soundTarget.mesh];
-const raycaster = new THREE.Raycaster(),
-  rotation = new THREE.Matrix4();
-const controllers = [];
-for (let i = 0; i < 2; i++) {
-  const controller = renderer.xr.getController(i);
-  rig.add(controller);
-  const line = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(),
-      new THREE.Vector3(0, 0, -1),
-    ]),
-    new THREE.LineBasicMaterial({ color: 0xbad59c }),
-  );
-  line.scale.z = 5;
-  controller.add(line);
-  controller.addEventListener("selectstart", () => {
-    rotation.identity().extractRotation(controller.matrixWorld);
-    raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(rotation);
-    const hit = raycaster.intersectObjects(targets)[0];
-    if (hit) hit.object.userData.action();
-    else if (director.phase !== "running") begin();
-  });
-  controllers.push(controller);
-}
-const buttonDown = new Map();
-function controllerButtons() {
-  for (const source of renderer.xr.getSession()?.inputSources || []) {
-    const pressed = !!source.gamepad?.buttons[4]?.pressed;
-    if (pressed && !buttonDown.get(source)) setSound(!audioEnabled);
-    buttonDown.set(source, pressed);
-  }
-}
-function connect() {
-  clearTimeout(retryTimer);
-  const generation = ++socketGeneration;
-  connection = "connecting";
-  const ws = new WebSocket(
-    `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/signals`,
-  );
-  socket = ws;
-  ws.onopen = () => {
-    if (generation !== socketGeneration) return;
-    connection = "connected";
-    retryMs = 500;
-  };
-  ws.onmessage = (e) => {
-    if (generation !== socketGeneration || mode !== "live") return;
-    try {
-      const message = JSON.parse(e.data);
-      if (!validSignal(message)) throw Error("Invalid signal packet");
-      lastSignal = message;
-      receivedAt = performance.now() / 1000;
-      $("error").textContent = "";
-    } catch (e) {
-      $("error").textContent = e.message;
-    }
-  };
-  ws.onerror = () => ws.close();
-  ws.onclose = () => {
-    if (generation !== socketGeneration) return;
-    connection = "disconnected";
-    if (mode === "live") {
-      retryTimer = setTimeout(connect, retryMs);
-      retryMs = Math.min(10000, retryMs * 2);
-    }
-  };
-}
-function selectSource() {
-  mode = $("source").value;
+$("reset").onclick = () => (fnaf ? fnafReset() : reset());
+$("pause").onclick = () => (fnaf ? null : togglePause());
+$("sound").onchange = () => setSound($("sound").checked);
+$("volume").oninput = applyVolume;
+$("intensity").oninput = () => {
+  client.setManualValue(+$("intensity").value);
+  $("intensityValue").textContent = (+$("intensity").value).toFixed(2);
+};
+$("quality").oninput = () => {
+  client.setManualQuality(+$("quality").value);
+  $("qualityValue").textContent = (+$("quality").value).toFixed(2);
+};
+$("source").onchange = () => {
+  const mode = $("source").value;
   director.input = null;
   director.receivedAt = -Infinity;
-  director.lowTime = director.highTime = 0;
-  director.state = "WAIT";
-  director.reliefLeft = 0;
-  lastSignal = null;
-  receivedAt = -Infinity;
-  clearTimeout(retryTimer);
-  socketGeneration++;
-  if (socket) {
-    socket.onclose = null;
-    socket.close();
-  }
-  socket = null;
-  connection = "disconnected";
+  client.setMode(mode);
   $("intensity").disabled = mode !== "manual";
-  if (mode === "live") connect();
+  $("quality").disabled = mode !== "manual";
+};
+$("camToggle").onclick = toggleCameras;
+$("camNext").onclick = nextCamera;
+$("doorBtn").onclick = toggleDoor;
+for (const b of document.querySelectorAll("#camButtons [data-cam]"))
+  b.onclick = () => selectCamera(+b.dataset.cam);
+{
+  const f = $("floodBtn");
+  const on = (e) => {
+    floodDesk = true;
+    e.preventDefault();
+  };
+  const off = () => (floodDesk = false);
+  f.addEventListener("pointerdown", on);
+  for (const ev of ["pointerup", "pointerleave", "pointercancel", "blur"])
+    f.addEventListener(ev, off);
 }
-$("source").onchange = selectSource;
-$("start").onclick = begin;
-$("reset").onclick = reset;
-$("sound").onchange = () => setSound($("sound").checked);
-$("intensity").oninput = () =>
-  ($("intensityValue").textContent = Number($("intensity").value).toFixed(2));
+const onAi = () => {
+  const n = clampAi($("aiLevel").value);
+  $("aiLevel").value = n;
+  $("aiLevelValue").textContent = n;
+  $("difficulty").value = difficultyFor(n);
+  applyAggression();
+};
+$("aiLevel").addEventListener("input", onAi);
+$("aiLevel").addEventListener("change", onAi);
+$("difficulty").onchange = () => {
+  const d = DIFFICULTY[$("difficulty").value];
+  if (!d) return;
+  $("aiLevel").value = d.ai;
+  onAi();
+  toast(`${d.label}: AI level ${d.ai}`);
+};
+$("scenario").onchange = () => client.setScenario($("scenario").value);
+$("presetTense").onclick = () => {
+  $("intensity").value = 0.05;
+  $("intensity").dispatchEvent(new Event("input"));
+  toast("Build preset: low input, tension rises");
+};
+$("presetCalm").onclick = () => {
+  $("intensity").value = 0.95;
+  $("intensity").dispatchEvent(new Event("input"));
+  toast("Relief preset: high input, room eases");
+};
+$("duration").onchange = () => {
+  if (director.phase !== "running")
+    director.config.duration = +$("duration").value;
+};
+$("atmosphere").onchange = () => {
+  atmosphere.setPreset($("atmosphere").value);
+  toast(`Atmosphere: ${$("atmosphere").value}`);
+};
 for (const field of ["low", "high"])
   $(field).onchange = () => {
     const low = +$("low").value,
@@ -334,7 +554,7 @@ for (const field of ["low", "high"])
       high - low < 0.1
     ) {
       $("error").textContent =
-        "Thresholds must be 0–1, with high at least 0.10 above low.";
+        "Thresholds must be 0-1, with high at least 0.10 above low.";
       $(field).value = director.config[field];
       return;
     }
@@ -343,7 +563,108 @@ for (const field of ["low", "high"])
     director.lowTime = director.highTime = 0;
     $("error").textContent = "";
   };
-// Desktop mouse-look only. No forced camera travel or unexpected world motion.
+$("helpToggle").onclick = () => {
+  const open = $("helpPanel").classList.toggle("hidden");
+  $("helpToggle").setAttribute("aria-expanded", String(!open));
+};
+$("consoleToggle").onclick = () => {
+  const el = $("directorConsole");
+  const collapsed = el.classList.contains("collapsed");
+  el.classList.toggle("collapsed", !collapsed);
+  el.classList.toggle("open", collapsed);
+  $("consoleToggle").setAttribute("aria-expanded", String(collapsed));
+};
+$("dismissSummary").onclick = () =>
+  $("summaryPanel").classList.add("hidden");
+$("exportSession").onclick = () => {
+  download("quiet-room-session.json", JSON.stringify(sessionExport(), null, 2));
+  toast("Session summary downloaded");
+};
+$("savePreset").onclick = () => {
+  localStorage.setItem(PRESET_KEY, JSON.stringify(collectPreset()));
+  toast("Preset saved in this browser");
+};
+$("exportPreset").onclick = () => {
+  download("quiet-room-preset.json", JSON.stringify(collectPreset(), null, 2));
+  toast("Preset downloaded");
+};
+$("resetPreset").onclick = () => {
+  localStorage.removeItem(PRESET_KEY);
+  applyPreset({
+    low: "0.30",
+    high: "0.75",
+    duration: "120",
+    atmosphere: "observatory",
+    volume: "0.6",
+    position: "back",
+    scenario: "cycle",
+    aiLevel: "5",
+    lighting: true,
+    fog: true,
+    shadow: true,
+  });
+  toast("Preset reset to defaults");
+};
+$("importPreset").onclick = () => {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json";
+  input.onchange = async () => {
+    try {
+      const parsed = JSON.parse(await input.files[0].text());
+      if (!applyPreset(parsed)) throw Error("not a preset object");
+      toast("Preset imported");
+    } catch (e) {
+      $("error").textContent = `Preset import failed: ${e.message}`;
+    }
+  };
+  input.click();
+};
+const saved = localStorage.getItem(PRESET_KEY);
+if (saved) {
+  try {
+    applyPreset(JSON.parse(saved));
+  } catch {
+    localStorage.removeItem(PRESET_KEY);
+  }
+}
+
+// ---------- keyboard ----------
+const held = new Set();
+addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if (e.key.toLowerCase() === "t") return toggleTestPanel();
+  if (fnaf && fnafKey(e, true)) return;
+  const k = e.key.toLowerCase();
+  if (["w", "a", "s", "d"].includes(k)) held.add(k);
+  else if (k === " ") {
+    e.preventDefault();
+    togglePause();
+  } else if (k === "r") reset();
+  else if (k === "1") $("presetTense").click();
+  else if (k === "2") $("presetCalm").click();
+  else if (k === "h") $("helpToggle").click();
+  else if (k === "e") interact();
+  else if (k === "c") toggleCameras();
+  else if (k === "v") nextCamera();
+  else if (k === "tab") {
+    e.preventDefault();
+    nextCamera();
+  } else if (k === "x") toggleDoor();
+  else if (k === "l") floodDesk = true;
+  else if (k === "f")
+    document.fullscreenElement
+      ? document.exitFullscreen()
+      : document.documentElement.requestFullscreen();
+});
+addEventListener("keyup", (e) => {
+  if (fnaf && fnafKey(e, false)) return;
+  const k = e.key.toLowerCase();
+  held.delete(k);
+  if (k === "l") floodDesk = false;
+});
+
+// ---------- desktop look + walk ----------
 let dragging = false,
   lastX = 0,
   lastY = 0,
@@ -352,6 +673,7 @@ let dragging = false,
 camera.rotation.order = "YXZ";
 renderer.domElement.addEventListener("pointerdown", (e) => {
   if (renderer.xr.isPresenting) return;
+  clickStart = { x: e.clientX, y: e.clientY };
   dragging = true;
   lastX = e.clientX;
   lastY = e.clientY;
@@ -365,188 +687,1453 @@ renderer.domElement.addEventListener("pointermove", (e) => {
   lastX = e.clientX;
   lastY = e.clientY;
 });
-renderer.domElement.addEventListener("pointerup", () => (dragging = false));
+renderer.domElement.addEventListener("pointerup", (e) => {
+  dragging = false;
+  if (fnaf && clickStart && Math.hypot(e.clientX - clickStart.x, e.clientY - clickStart.y) < 5) {
+    fnafPickAt((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  }
+  clickStart = null;
+});
+let clickStart = null;
 renderer.domElement.addEventListener("pointercancel", () => (dragging = false));
+function walk(dt) {
+  if (renderer.xr.isPresenting || !held.size || director.phase === "running") return;
+  const speed = 1.8 * dt;
+  const fx = -Math.sin(yaw),
+    fz = -Math.cos(yaw);
+  let dx = 0,
+    dz = 0;
+  if (held.has("w")) (dx += fx), (dz += fz);
+  if (held.has("s")) (dx -= fx), (dz -= fz);
+  if (held.has("a")) (dx += fz), (dz -= fx);
+  if (held.has("d")) (dx -= fz), (dz += fx);
+  if (!dx && !dz) return;
+  const n = Math.hypot(dx, dz);
+  rig.position.x = THREE.MathUtils.clamp(
+    rig.position.x + (dx / n) * speed,
+    -3.1,
+    3.1,
+  );
+  rig.position.z = THREE.MathUtils.clamp(
+    rig.position.z + (dz / n) * speed,
+    -5.0,
+    3.1,
+  );
+}
+
+// ---------- interaction (desktop crosshair + XR controllers) ----------
+const raycaster = new THREE.Raycaster();
+const interactableMeshes = environment.interactables.map((i) => i.mesh);
+const byId = Object.fromEntries(
+  environment.interactables.map((i) => [i.id, i]),
+);
+function aimedInteractable(origin, direction) {
+  raycaster.set(origin, direction);
+  raycaster.far = 4.5;
+  const hit = raycaster.intersectObjects(interactableMeshes, true)[0];
+  if (!hit) return null;
+  let o = hit.object;
+  while (o && !o.userData.interactableId) o = o.parent;
+  return o ? byId[o.userData.interactableId] : null;
+}
+const aimOrigin = new THREE.Vector3(),
+  aimDir = new THREE.Vector3();
+function desktopAim() {
+  camera.getWorldPosition(aimOrigin);
+  camera.getWorldDirection(aimDir);
+  return aimedInteractable(aimOrigin, aimDir);
+}
+function activateInteractable(target) {
+  if (!target) return false;
+  if (target.id === "corridor-door") toggleDoor();
+  else target.onInteract();
+  return true;
+}
+function interact() {
+  if (renderer.xr.isPresenting) return;
+  if (fnaf) return fnafInteractCenter();
+  const target = desktopAim();
+  if (target) {
+    activateInteractable(target);
+    toast(target.label);
+  }
+}
+
+// ---------- in-world HUD and XR target panels ----------
+// Everything below lives in WORLD space (children of the scene, never of the
+// camera), so it never swims with the head in VR.
+function panel(width, height, canvasWidth, canvasHeight) {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvasWidth;
+  canvas.height = canvasHeight;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(width, height),
+    new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      fog: false,
+    }),
+  );
+  return { canvas, ctx: canvas.getContext("2d"), texture, mesh };
+}
+const hud = panel(1.65, 0.82, 1024, 512);
+hud.mesh.position.set(-1.3, 1.95, -1.25);
+hud.mesh.rotation.y = 0.25;
+scene.add(hud.mesh);
+function drawTarget(p, text, lit = false) {
+  const c = p.ctx;
+  c.clearRect(0, 0, 650, 160);
+  c.fillStyle = lit ? "#6d5a26" : "#243429";
+  c.fillRect(0, 0, 650, 160);
+  c.strokeStyle = lit ? "#e0b84f" : "#9aad86";
+  c.lineWidth = 4;
+  c.strokeRect(3, 3, 644, 154);
+  c.fillStyle = "#f1f5e8";
+  c.font = "bold 44px sans-serif";
+  c.textAlign = "center";
+  c.fillText(text, 325, 95);
+  p.texture.needsUpdate = true;
+}
+function target(text, x, action) {
+  const p = panel(0.65, 0.16, 650, 160);
+  drawTarget(p, text);
+  p.mesh.position.set(x, 1.38, -1.05);
+  p.mesh.rotation.y = -x * 0.12; // gentle inward curve toward the player
+  p.mesh.userData.action = action;
+  scene.add(p.mesh);
+  return p;
+}
+const startTarget = target("BEGIN / RESET", -1.05, () => {
+  if (fnaf) return fnaf.phase === "idle" ? fnafBegin() : fnafReset();
+  if (director.phase === "running") reset();
+  else begin();
+});
+const soundTarget = target("SOUND: OFF", -0.35, () => setSound(!audioEnabled));
+const camTarget = target("CAMERAS", 0.35, toggleCameras);
+const nextTarget = target("NEXT CAM", 1.05, nextCamera);
+const targets = [startTarget.mesh, soundTarget.mesh, camTarget.mesh, nextTarget.mesh];
+// Power readout lives on the cabinet by the CRT (never head-locked).
+const powerPanel = panel(0.62, 0.3, 512, 248);
+powerPanel.mesh.position.set(-2.1, 2.05, -3.45);
+powerPanel.mesh.lookAt(0, 1.7, 2);
+scene.add(powerPanel.mesh);
+
+const xrRotation = new THREE.Matrix4();
+const controllers = [];
+for (let i = 0; i < 2; i++) {
+  const controller = renderer.xr.getController(i);
+  rig.add(controller);
+  controllers.push(controller);
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(),
+      new THREE.Vector3(0, 0, -1),
+    ]),
+    new THREE.LineBasicMaterial({ color: 0xbad59c }),
+  );
+  line.scale.z = 5;
+  controller.add(line);
+  controller.addEventListener("selectstart", () => (fnaf ? fnafSelect(controller) : pointerSelect(controller)));
+}
+function pointerSelect(controller) {
+  xrRotation.identity().extractRotation(controller.matrixWorld);
+  aimOrigin.setFromMatrixPosition(controller.matrixWorld);
+  aimDir.set(0, 0, -1).applyMatrix4(xrRotation);
+  raycaster.set(aimOrigin, aimDir);
+  raycaster.far = 20;
+  // Nearest of: UI panels, the CRT, interactable props.
+  const modeHit = raycaster.intersectObjects(modeTargets)[0];
+  if (modeHit && pickModeFromHit(modeHit)) return;
+  const panelHit = raycaster.intersectObjects(targets)[0];
+  const crtHit = raycaster.intersectObject(monitor.group, true)[0];
+  raycaster.far = 4.5;
+  const propHit = raycaster.intersectObjects(interactableMeshes, true)[0];
+  const best = [
+    panelHit && { d: panelHit.distance, run: () => panelHit.object.userData.action() },
+    crtHit && {
+      d: crtHit.distance,
+      run: () => (monitor.isActive() ? nextCamera() : setCameras(true)),
+    },
+    propHit && {
+      d: propHit.distance,
+      run: () => {
+        let o = propHit.object;
+        while (o && !o.userData.interactableId) o = o.parent;
+        activateInteractable(o && byId[o.userData.interactableId]);
+      },
+    },
+  ]
+    .filter(Boolean)
+    .sort((a, b) => a.d - b.d)[0];
+  if (best) return best.run();
+  if (director.phase !== "running") begin();
+}
+function fnafSelect(controller) {
+  xrRotation.identity().extractRotation(controller.matrixWorld);
+  aimOrigin.setFromMatrixPosition(controller.matrixWorld);
+  aimDir.set(0, 0, -1).applyMatrix4(xrRotation);
+  raycaster.set(aimOrigin, aimDir);
+  raycaster.far = 6;
+  if (pickModeFromHit(raycaster.intersectObjects(modeTargets)[0])) return;
+  const items = fnafWorld.interactables();
+  const hit = raycaster.intersectObjects(items.map((i) => i.mesh), true)[0];
+  if (hit) {
+    let o = hit.object;
+    while (o && !o.userData.interactableId) o = o.parent;
+    const item = o && items.find((i) => i.id === o.userData.interactableId);
+    if (item) return item.onInteract(hit);
+  }
+  if (fnaf.phase === "idle") fnafBegin();
+}
+const buttonDown = new Map();
+function controllerButtons() {
+  let grip = false;
+  let gripController = null;
+  const sources = renderer.xr.getSession()?.inputSources || [];
+  sources.forEach((source, idx) => {
+    const b = source.gamepad?.buttons;
+    const a = !!b?.[4]?.pressed;
+    const y = !!b?.[5]?.pressed;
+    const sq = !!b?.[1]?.pressed;
+    const prev = buttonDown.get(source) || {};
+    if (a && !prev.a) setSound(!audioEnabled);
+    if (y && !prev.y) toggleCameras();
+    if (sq) {
+      grip = true;
+      gripController = controllers[idx] ?? gripController;
+    }
+    buttonDown.set(source, { a, y });
+  });
+  floodVR = grip;
+  if (gripController && floodlight.parent !== gripController) {
+    gripController.add(floodlight);
+    floodlight.position.set(0, 0, 0);
+  }
+}
+function attachFloodlightToCamera() {
+  if (floodlight.parent !== camera) {
+    camera.add(floodlight);
+    floodlight.position.set(0.08, -0.1, 0);
+  }
+}
 renderer.xr.addEventListener("sessionstart", () => {
   camera.position.set(0, 0, 0);
   camera.rotation.set(0, 0, 0);
-  $("overlay").style.display = "none";
+  $("overlay").classList.add("hidden");
+  $("crosshair").classList.add("hidden");
+  $("interactHint").classList.add("hidden");
 });
 renderer.xr.addEventListener("sessionend", () => {
   camera.position.set(0, 1.6, 0);
   camera.rotation.set(pitch, yaw, 0);
-  $("overlay").style.display = "";
+  if (director.phase !== "running") $("overlay").classList.remove("hidden");
   buttonDown.clear();
+  floodVR = false;
+  attachFloodlightToCamera();
 });
-const position = new THREE.Vector3(),
-  quaternion = new THREE.Quaternion(),
-  forward = new THREE.Vector3(),
-  up = new THREE.Vector3();
-function updateAudio(tension, active) {
-  if (!audio) return;
-  const { context, gain, panner } = audio;
-  const level = audioEnabled && active ? 0.006 + tension * 0.014 : 0;
-  gain.gain.setTargetAtTime(level, context.currentTime, 0.3);
-  panner.positionX.value = figure.position.x;
-  panner.positionY.value = 1.3;
-  panner.positionZ.value = figure.position.z;
-  const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
-  cam.getWorldPosition(position);
-  cam.getWorldQuaternion(quaternion);
-  forward.set(0, 0, -1).applyQuaternion(quaternion);
-  up.set(0, 1, 0).applyQuaternion(quaternion);
-  const listener = context.listener;
-  if (listener.positionX) {
-    listener.positionX.value = position.x;
-    listener.positionY.value = position.y;
-    listener.positionZ.value = position.z;
-    listener.forwardX.value = forward.x;
-    listener.forwardY.value = forward.y;
-    listener.forwardZ.value = forward.z;
-    listener.upX.value = up.x;
-    listener.upY.value = up.y;
-    listener.upZ.value = up.z;
-  }
-}
+
 function drawHud(s) {
   const ctx = hud.ctx;
+  const ps = power.getState();
   ctx.clearRect(0, 0, 1024, 512);
-  ctx.fillStyle = "#0d1916ed";
+  ctx.fillStyle = "#0b1412f2";
   ctx.fillRect(0, 0, 1024, 512);
-  ctx.strokeStyle = "#5f7655";
+  ctx.strokeStyle = "#7d9770";
+  ctx.lineWidth = 4;
   ctx.strokeRect(3, 3, 1018, 506);
+  ctx.textAlign = "left";
   ctx.fillStyle = "#c6d7ad";
-  ctx.font = "32px sans-serif";
-  ctx.fillText("FOCUSED / THE QUIET ROOM", 38, 65);
-  ctx.fillStyle = "#e2e7dc";
-  ctx.font = "48px sans-serif";
-  ctx.fillText(`${s.state}    ${Math.ceil(s.remaining)}s`, 38, 140);
   ctx.font = "30px sans-serif";
+  ctx.fillText("FOCUSED / THE QUIET ROOM", 36, 56);
+  ctx.fillStyle = "#f2f5ec";
+  ctx.font = "bold 52px sans-serif";
+  ctx.fillText(
+    `${s.state}${s.paused ? " (PAUSED)" : ""}   ${Math.ceil(s.remaining)}s`,
+    36,
+    122,
+  );
+  ctx.font = "30px sans-serif";
+  const mode = client.stats().mode ?? "manual";
   const src = mode === "live" ? s.source : mode;
   ctx.fillText(
-    `SOURCE: ${src.toUpperCase()}${src === "hardware" ? " (bridge-reported)" : " / DEMO"}`,
-    38,
-    205,
+    `SOURCE ${src.toUpperCase()}${src === "hardware" ? " (bridge-reported)" : " / DEMO"}`,
+    36,
+    175,
   );
   ctx.fillText(
-    `INPUT ${s.intensity.toFixed(2)}    TENSION ${s.tension.toFixed(2)}`,
-    38,
-    260,
+    `INPUT ${s.intensity.toFixed(2)}   TENSION ${s.tension.toFixed(2)}   Q ${s.quality.toFixed(2)}`,
+    36,
+    222,
   );
+  const tier = powerTier(ps.percent, ps.blackout);
+  ctx.fillStyle = tier === "ok" ? "#b8d9a0" : tier === "warning" ? "#e8c05a" : "#f08a72";
+  ctx.font = "bold 36px sans-serif";
   ctx.fillText(
-    `QUALITY ${s.quality.toFixed(2)}    ${s.fresh ? "FRESH" : "NO FRESH SIGNAL"}`,
-    38,
-    315,
+    ps.blackout ? "POWER OUT" : `POWER ${ps.percent}%${monitor.isActive() ? "  CAMS" : ""}${floodOn() ? "  LIGHT" : ""}${doorSealed ? "  DOOR" : ""}`,
+    36,
+    276,
   );
-  ctx.fillStyle = "#9eaf98";
-  ctx.font = "25px sans-serif";
-  ctx.fillText(
+  ctx.fillStyle = hudNote.until > performance.now() / 1000 ? "#f0c27a" : "#9eaf98";
+  ctx.font = "27px sans-serif";
+  const hint =
     s.phase === "ended"
-      ? "Complete. Point at BEGIN / RESET to try again."
+      ? s.endedReason === "caught"
+        ? "CAUGHT. Point at BEGIN / RESET to try again."
+        : "You survived. Point at BEGIN / RESET to replay."
       : s.phase === "ready"
-        ? "Point and trigger BEGIN. A/X toggles sound."
-        : "Point and trigger buttons. A/X toggles sound.",
-    38,
-    385,
-  );
-  ctx.fillText(
-    s.state === "WAIT"
-      ? "Waiting: atmosphere eases off."
-      : `Sound ${audioEnabled ? "ON" : "OFF"} · Experimental response proxy`,
-    38,
-    438,
-  );
+        ? "Point + trigger BEGIN. A/X sound. B/Y cameras. Grip = floodlight."
+        : hudNote.until > performance.now() / 1000
+          ? hudNote.text
+          : "Watch the Attendant. Face the ghost. Save power.";
+  wrapText(ctx, hint, 36, 335, 950, 34);
+  ctx.fillStyle = "#8fa08a";
+  ctx.font = "24px sans-serif";
+  const linked=signalLink.snapshot();
+  ctx.font="21px monospace";
+  ctx.fillText(`OPERATOR LINK ${linked.connection}  RECV ${linked.received} / APPLY ${linked.applied}`,36,430);
+  ctx.fillText((linked.lastAction||"Manual marker controls").slice(0,65),36,466);
   hud.texture.needsUpdate = true;
-  soundTarget.ctx.clearRect(0, 0, 650, 160);
-  soundTarget.ctx.fillStyle = "#243429";
-  soundTarget.ctx.fillRect(0, 0, 650, 160);
-  soundTarget.ctx.fillStyle = "#e0e9d3";
-  soundTarget.ctx.fillText(`SOUND: ${audioEnabled ? "ON" : "OFF"}`, 325, 95);
-  soundTarget.texture.needsUpdate = true;
+
+  drawTarget(soundTarget, `SOUND: ${audioEnabled ? "ON" : "OFF"}`, audioEnabled);
+  drawTarget(camTarget, monitor.isActive() ? "CAMERAS: UP" : "CAMERAS", monitor.isActive());
+  drawTarget(nextTarget, monitor.isActive() ? monitor.getCamera().label?.split("—")[0].trim() ?? "NEXT CAM" : "NEXT CAM");
+  drawTarget(startTarget, director.phase === "running" ? "RESET" : "BEGIN", false);
+
+  // Power panel by the CRT.
+  const c = powerPanel.ctx;
+  c.fillStyle = "#070b0bef";
+  c.fillRect(0, 0, 512, 248);
+  c.strokeStyle = tier === "ok" ? "#6c8a5f" : tier === "warning" ? "#c9a040" : "#c8553f";
+  c.lineWidth = 4;
+  c.strokeRect(3, 3, 506, 242);
+  c.textAlign = "left";
+  c.fillStyle = "#cfd8c4";
+  c.font = "bold 28px monospace";
+  c.fillText("SECURITY POWER", 22, 46);
+  c.font = "bold 78px monospace";
+  c.fillStyle = tier === "ok" ? "#b8d9a0" : tier === "warning" ? "#e8c05a" : "#f08a72";
+  c.fillText(ps.blackout ? "OUT" : `${ps.percent}%`, 22, 128);
+  c.fillStyle = "#1a2220";
+  c.fillRect(22, 150, 468, 26);
+  c.fillStyle = c.fillStyle = tier === "ok" ? "#8fb07a" : tier === "warning" ? "#d9a648" : "#d4644a";
+  c.fillRect(22, 150, 468 * (ps.blackout ? 0 : ps.level), 26);
+  c.fillStyle = "#cfd8c4";
+  c.font = "26px monospace";
+  const cam = monitor.getCamera();
+  c.fillText(monitor.isActive() ? cam.label ?? "CAM --" : "CAMERAS DOWN", 22, 214);
+  powerPanel.texture.needsUpdate = true;
 }
+function wrapText(ctx, text, x, y, maxW, lh) {
+  const words = text.split(" ");
+  let line = "";
+  for (const w of words) {
+    const t = line ? `${line} ${w}` : w;
+    if (ctx.measureText(t).width > maxW && line) {
+      ctx.fillText(line, x, y);
+      line = w;
+      y += lh;
+    } else line = t;
+  }
+  if (line) ctx.fillText(line, x, y);
+}
+
+// Shared by the lamp-flicker encounter and the test panel.
+function lampStutter() {
+  atmosphere.flicker(0.5, 1.6, "stutter");
+  cue("lightFlicker", { intensity: 0.4 });
+}
+
+// ---------- encounter -> entity routing ----------
+let lastEncounterKey = null;
+function routeEncounter(s) {
+  if (!s.encounter) {
+    lastEncounterKey = null;
+    return;
+  }
+  const fresh = s.encounter.t <= 0.2 && lastEncounterKey !== s.encounter.id;
+  if (!fresh) return;
+  lastEncounterKey = s.encounter.id;
+  const e = s.encounter;
+  if (e.id === "lamp-flicker") lampStutter();
+  if (e.id === "door-creak" && !doorSealed) byId["corridor-door"]?.onInteract();
+  if (e.id === "radio-static") {
+    const radio = byId.radio;
+    if (radio && !radio.mesh.userData.active) radio.onInteract();
+  }
+  // The Attendant is moved ONLY by the hunt coordinator (unobserved rule).
+}
+
+// ---------- hunt / power / scare event handling ----------
+const entityPos = (id) => {
+  const g = id === "ghost" ? ghost.group : attendant.group;
+  return { x: g.position.x, z: g.position.z };
+};
+function entityByName(id) {
+  return id === "ghost" ? ghost : attendant;
+}
+let attendantTargetWp = 0;
+function onHauntEvent(ev) {
+  switch (ev.type) {
+    case "move": {
+      if (ev.entity === "attendant") {
+        attendantTargetWp = ev.waypoint;
+        attendant.trigger("advance");
+        stats.noteMove("attendant");
+        if (monitor.getWatchedZone() === attendantZone(ev.waypoint)) {
+          monitor.staticBurst(0.7);
+          cue("static", { intensity: 0.5 });
+          notice("CAMERA INTERFERENCE: something moved on the feed.", { alert: true, seconds: 3 });
+        }
+      }
+      lampMotes.agitate(0.6);
+      break;
+    }
+    case "stage":
+      if (ev.entity === "attendant" && (ev.stage === "retreat" || ev.stage === "reset"))
+        attendantTargetWp = ev.waypoint ?? 0;
+      if (ev.stage === "manifest" && ev.entity === "ghost") {
+        if (ghost.state === "hidden") ghost.setState("apparition");
+        stats.noteMove("ghost");
+        if (monitor.getWatchedZone() === "doorway") {
+          monitor.staticBurst(0.7);
+          cue("static", { intensity: 0.5 });
+        }
+        environment.creakDoor(doorSealed ? 0 : 0.2);
+        notice("Something is standing in the corridor. Keep your eyes on it.", { alert: true });
+      }
+      break;
+    case "cue":
+      if (ev.cue === "stinger") break; // the scare flow times its own stinger
+      cue(ev.cue, { position: ev.entity ? entityPos(ev.entity) : undefined, intensity: ev.cue === "eyes" ? 0.7 : 0.75 });
+      break;
+    case "jumpscare": {
+      stats.noteJumpscare(ev, current.elapsed);
+      applyFlow(flow.trigger(ev));
+      break;
+    }
+    default:
+      break;
+  }
+}
+function applyFlow(actions) {
+  for (const a of actions) {
+    switch (a.type) {
+      case "duck":
+        audio.duck(a.seconds + 0.2);
+        musicBox.hardCut();
+        break;
+      case "lightsCut":
+        atmosphere.lightsCut(a.seconds); // the ONE cut-to-dark of this scare
+        lampMotes.agitate(1);
+        break;
+      case "lunge":
+        if (a.entity === "ghost") ghost.trigger("rush");
+        else attendant.trigger("jumpscare");
+        break;
+      case "stinger":
+        cue("stinger", { intensity: 1 });
+        break;
+      case "end":
+        director.end("caught");
+        break;
+    }
+  }
+}
+let blackoutOn = false; // a power-out sequence is running
+let blackoutClock = 0; // seconds since that power-out began
+function onPowerEvent(e) {
+  switch (e.type) {
+    case "warning":
+      notice("POWER 20%. Cameras and floodlight are draining it.", { alert: true });
+      cue("powerWarning");
+      break;
+    case "critical":
+      notice("POWER 10%. Conserve everything.", { alert: true });
+      cue("powerCritical");
+      break;
+    case "flicker":
+      atmosphere.flicker(0.55, 0.9, "sag");
+      cue("lightFlicker", { intensity: 0.5 });
+      lampMotes.agitate(0.3);
+      break;
+    case "blackout":
+      blackoutOn = true;
+      blackoutClock = 0;
+      monitor.setActive(false);
+      monitor.setSignalLost(true);
+      setDoor(false, true);
+      floodDesk = floodVR = false;
+      stats.blackoutAt = current.elapsed;
+      cue("blackout", { intensity: 0.9 });
+      notice("POWER OUT. Do not move. Do not look away.", { alert: true, seconds: 8 });
+      break;
+  }
+}
+function onBlackoutBeat(name) {
+  if (name === "dark") {
+    atmosphere.setBlackout(true);
+    musicBox.setWind(0);
+    windLocked = true;
+    lampMotes.agitate(1);
+  } else if (name === "musicBox") {
+    musicBox.setMuffled(true);
+    musicBox.setWind(0.45); // a distant, wheezing box from behind a wall
+  } else if (name === "eyes") {
+    attendant.setBlackout(true);
+    ghost.setBlackout(true);
+    haunt.notify("blackout");
+  }
+}
+function onSessionEnded() {
+  endHandled = true;
+  stats.powerAtEnd = power.getState().percent;
+  power.stop();
+  floodDesk = floodVR = false;
+  if (current.endedReason !== "caught") {
+    atmosphere.setBlackout(false);
+    attendant.setBlackout(false);
+    ghost.setBlackout(false);
+    haunt.notify("blackout-end");
+    musicBox.setMuffled(false);
+    musicBox.setWind(1);
+    windLocked = false;
+  }
+}
+
+// ---------- observation ----------
+const headPos = new THREE.Vector3();
+const headQuat = new THREE.Quaternion();
+const headCam = { position: headPos, quaternion: headQuat };
+function headPose() {
+  if (renderer.xr.isPresenting) renderer.xr.updateCamera(camera);
+  camera.updateWorldMatrix(true, false);
+  camera.getWorldPosition(headPos);
+  camera.getWorldQuaternion(headQuat);
+  return headCam;
+}
+const tgt = { x: 0, y: 0, z: 0 };
+function coneSees(head, group) {
+  tgt.x = group.position.x;
+  tgt.y = group.position.y + 1.1;
+  tgt.z = group.position.z;
+  return focusObserved(head, tgt);
+}
+
+// ---------- stats ----------
+let fpsAccum = 0,
+  fpsFrames = 0,
+  fpsValue = 0;
+function updateStats(s) {
+  const stats2 = client.stats();
+  $("sourceStat").textContent = (
+    stats2.mode === "live" ? s.source : (stats2.mode ?? "manual")
+  ).toUpperCase();
+  $("stateStat").textContent = s.paused ? `${s.state} ⏸` : s.state;
+  $("tensionStat").textContent = s.tension.toFixed(2);
+  $("qualityStat").textContent = s.quality.toFixed(2);
+  $("encounterStat").textContent = s.encounter ? s.encounter.id : "–";
+  $("fpsStat").textContent = fpsValue ? fpsValue.toFixed(0) : "–";
+  $("rateStat").textContent = `${stats2.receiveRate.toFixed(1)} Hz`;
+  $("signalAgeStat").textContent =
+    stats2.lastSignalAgeMs == null
+      ? "–"
+      : `${(stats2.lastSignalAgeMs / 1000).toFixed(1)}s`;
+  const sec = Math.ceil(s.remaining);
+  $("timeStat").textContent =
+    `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+  $("progressBar").setAttribute("aria-valuenow", Math.round(s.progress * 100));
+  $("progressBar").querySelector(".progress-fill").style.width =
+    `${(s.progress * 100).toFixed(1)}%`;
+  $("connection").textContent =
+    stats2.mode === "live"
+      ? `Relay ${connectionStatus.connection} · ${s.fresh ? "receiving" : "waiting for fresh input"}`
+      : `${(stats2.mode ?? "manual").toUpperCase()} DEMO · no hardware claim`;
+
+  // Power + camera dock
+  const ps = power.getState();
+  const tier = powerTier(ps.percent, ps.blackout);
+  $("powerPct").textContent = ps.blackout ? "OUT" : `${ps.percent}%`;
+  $("powerStat").textContent = ps.blackout ? "OUT" : `${ps.percent}%`;
+  $("powerFill").style.width = `${ps.blackout ? 0 : ps.percent}%`;
+  $("powerBar").dataset.tier = tier;
+  $("powerDock").dataset.tier = tier;
+  $("powerBar").setAttribute("aria-valuenow", ps.percent);
+  $("powerEta").textContent = ps.blackout
+    ? "POWER OUT"
+    : formatEta(ps.secondsRemaining, s.remaining, powerScale);
+  $("loadMonitor").classList.toggle("on", ps.activeLoads.includes("monitor"));
+  $("loadFlood").classList.toggle("on", ps.activeLoads.includes("floodlight"));
+  $("loadDoor").classList.toggle("on", ps.activeLoads.includes("door"));
+  const up = monitor.isActive();
+  const cam = monitor.getCamera();
+  $("camToggle").setAttribute("aria-pressed", String(up));
+  $("floodBtn").setAttribute("aria-pressed", String(floodOn()));
+  $("doorBtn").setAttribute("aria-pressed", String(doorSealed));
+  for (const b of document.querySelectorAll("#camButtons button")) {
+    b.disabled = !up;
+    b.classList.toggle("sel", up && b.dataset.cam !== undefined && +b.dataset.cam === cam.index);
+  }
+  $("camLabel").textContent = ps.blackout ? "SIGNAL LOST: POWER OUT" : up ? (cam.label ?? "NO SIGNAL") : "CAMERAS DOWN";
+  $("camStat").textContent = ps.blackout ? "LOST" : up ? `CAM ${cam.index + 1}` : "DOWN";
+
+  const hs = haunt.snapshot();
+  const att = hs.entities.attendant;
+  const gh = hs.entities.ghost;
+  $("attendantStat").textContent = `${att.waypoint}/${att.waypoints - 1}${attendant.observed ? " seen" : ""}`;
+  $("ghostStat").textContent = `${Math.round(gh.charge * 100)}%${ghost.observed ? " seen" : ""}`;
+  $("aiStat").textContent = `${att.aggression}→${att.effective.toFixed(1)}`;
+}
+
+// ---------- FNAF modes (menu-selected; the room stays the default) ----------
+let fnaf = null; // FnafSession while a FNAF mode is active, else null
+let fnafNight = 1;
+const fnafFlow = new JumpscareFlow();
+const roomRoots = []; // scene children that belong to the room; hidden in FNAF
+const bgRoom = scene.background;
+const fogRoom = scene.fog;
+const FNAF_BG = new THREE.Color("#050505");
+const overlayHTML = $("overlay").innerHTML;
+const fnafWorld = createFnafWorld(THREE, renderer, scene, {
+  audioEngine: audio,
+  onPress: (mode, id, info) => fnafPress(mode, id, info),
+});
+
+function fnafCaption(text, opts) {
+  notice(text, opts);
+}
+
+function setRoomVisible(on) {
+  for (const o of roomRoots) o.visible = on;
+}
+
+function fnafStart(mode, night) {
+  if (fnaf) fnafStop();
+  if (director.phase === "running") reset();
+  fnafNight = Number(night) || 1;
+  fnaf = new FnafSession({
+    mode,
+    night: fnafNight,
+    rng: Math.random,
+    now: () => performance.now() / 1000,
+    secondsPerHour: mode === "fnaf1" ? 30 : 45,
+  });
+  const eye = fnafWorld.enter(mode);
+  setRoomVisible(false);
+  scene.fog = null;
+  scene.background = FNAF_BG;
+  floodlight.intensity = 0;
+  if (!renderer.xr.isPresenting) {
+    rig.position.set(0, 0, 0);
+    camera.position.set(eye.x, eye.y, eye.z);
+  }
+  document.body.classList.add("fnaf");
+  $("pause").classList.add("hidden");
+  $("reset").textContent = "Reset";
+  $("crosshair").classList.add("hidden");
+  $("position").disabled = true;
+  fnafFlow.reset();
+  $("overlay").innerHTML = fnafIntroHTML(mode, fnafNight);
+  $("overlay").classList.remove("hidden");
+  $("summaryPanel").classList.add("hidden");
+  $("fnafBar").innerHTML = KEYMAP[mode].map(([k, v]) => `<span><kbd>${k}</kbd> ${v}</span>`).join("");
+  $("fnafBar").classList.remove("hidden");
+  $("modeLabel").textContent = MODE_LABELS[mode];
+  setState(`${MODE_LABELS[mode]}, night ${fnafNight}. Press Begin or Space.`);
+  updateFnafDock();
+}
+
+function fnafIntroHTML(mode, night) {
+  return `
+    <section class="onboard-card">
+      <p class="eyebrow">${MODE_LABELS[mode].toUpperCase()} &middot; NIGHT ${night}</p>
+      <h1>${night === 1 ? "The first night." : `Night ${night}.`}</h1>
+      <p class="onboard-steps">Nothing moves while you look straight at it. Keep the lights and the doors under control, and mind the power.
+      Keys are listed along the bottom. Click things to use them.</p>
+      <button id="start" type="button" class="primary">Begin (Space)</button>
+      <p class="onboard-note">Sound stays off until you enable it in the console.</p>
+    </section>`;
+}
+
+function fnafStop() {
+  if (!fnaf) return;
+  fnafWorld.exit();
+  fnaf = null;
+  director.reset();
+  setRoomVisible(true);
+  if (!renderer.xr.isPresenting) {
+    rig.position.set(0, 0, 2);
+    camera.position.set(0, 1.6, 0);
+  }
+  scene.fog = fogRoom;
+  scene.background = bgRoom;
+  document.body.classList.remove("fnaf");
+  $("pause").classList.remove("hidden");
+  $("fnafBar").classList.add("hidden");
+  $("modeLabel").textContent = "Room";
+  $("summaryPanel").classList.add("hidden");
+  $("position").disabled = false;
+  $("overlay").innerHTML = overlayHTML;
+  $("overlay").classList.remove("hidden");
+  $("caption").classList.add("hidden");
+  updateFnafDock();
+}
+
+function fnafBegin() {
+  if (!fnaf || fnaf.phase !== "idle") return;
+  fnaf.start();
+  director.start();
+  $("overlay").classList.add("hidden");
+  setState(`Night ${fnafNight}. Watch the doors and the power.`);
+  fnafCaption("Night begins.", { seconds: 3 });
+}
+
+function fnafReset() {
+  if (!fnaf) return;
+  const mode = fnaf.mode;
+  fnafWorld.exit();
+  fnafFlow.reset();
+  fnaf.reset();
+  director.reset();
+  fnafWorld.enter(mode);
+  scene.background = FNAF_BG;
+  $("overlay").innerHTML = fnafIntroHTML(mode, fnafNight);
+  $("overlay").classList.remove("hidden");
+  $("summaryPanel").classList.add("hidden");
+  $("caption").classList.add("hidden");
+  setState(`${MODE_LABELS[mode]}, night ${fnafNight}. Press Begin or Space.`);
+  updateFnafDock();
+}
+
+function fnafPress(mode, id, info) {
+  if (!fnaf || fnaf.mode !== mode) return;
+  if (id === "dead") return fnafCaption("No power.", { alert: true, seconds: 2 });
+  if (fnaf.phase === "idle") return fnafCaption("Press Begin (Space) first.", { seconds: 2 });
+  if (fnaf.phase !== "running") return;
+  applyPress(fnaf, id, info);
+}
+
+// Keyboard for FNAF modes. Returns true when the key was consumed.
+function fnafKey(e, down) {
+  if (!fnaf) return false;
+  const k = e.key.toLowerCase();
+  const c = fnaf.controls;
+  const mode = fnaf.mode;
+  if (k === " ") {
+    if (down) {
+      if (fnaf.phase === "idle") fnafBegin();
+    }
+    if (mode === "fnaf4") c.hold = down;
+    return true;
+  }
+  if (k === "r") {
+    if (down) fnafReset();
+    return true;
+  }
+  if (k === "e") {
+    if (down) fnafInteractCenter();
+    return true;
+  }
+  const cycle = (list, key, step) => {
+    const i = list.indexOf(c[key]);
+    c[key] = list[(i + step + list.length) % list.length];
+  };
+  if (mode === "fnaf1") {
+    if (!down && (k === "z" || k === "m")) {
+      if (k === "z") c.lightL = false;
+      else c.lightR = false;
+      return true;
+    }
+    if (!down) return false;
+    if (k === "q") applyPress(fnaf, "door-left");
+    else if (k === "p") applyPress(fnaf, "door-right");
+    else if (k === "z") c.lightL = true;
+    else if (k === "m") c.lightR = true;
+    else if (k === "c") applyPress(fnaf, "monitor");
+    else if (k === "[") cycle(CAMERAS, "room", -1);
+    else if (k === "]") cycle(CAMERAS, "room", 1);
+    else return false;
+    return true;
+  }
+  if (mode === "fnaf2") {
+    if (k === "f" || k === "w") {
+      const field = k === "f" ? "flashlight" : "wind";
+      c[field] = down;
+      return true;
+    }
+    if (!down) return false;
+    if (k === "m") applyPress(fnaf, "mask");
+    else if (k === "c") applyPress(fnaf, "monitor");
+    else if (k === "q") applyPress(fnaf, "vent-left");
+    else if (k === "p") applyPress(fnaf, "vent-right");
+    else if (k === "[") cycle(CAMS2, "cam", -1);
+    else if (k === "]") cycle(CAMS2, "cam", 1);
+    else return false;
+    return true;
+  }
+  if (mode === "fnaf3") {
+    if (!down) return false;
+    if (k === "c") applyPress(fnaf, "btn-camera");
+    else if (k === "[") cycle(CAMS3, "cam", -1);
+    else if (k === "]") cycle(CAMS3, "cam", 1);
+    else if (k === "g") applyPress(fnaf, "lure");
+    else if (k === "1") applyPress(fnaf, "vent-0");
+    else if (k === "2") applyPress(fnaf, "vent-1");
+    else if (k === "3") applyPress(fnaf, "vent-2");
+    else if (k === "y") applyPress(fnaf, "btn-audio");
+    else if (k === "i") applyPress(fnaf, "btn-vent");
+    else if (k === "u") c.reboot = "camera";
+    else if (k === "x") {
+      const p = fnaf.engine.snapshot().phantoms?.find?.((q) => q.id || q.name);
+      if (p) c.dismiss = p.id ?? p.name;
+    } else return false;
+    return true;
+  }
+  if (mode === "fnaf4") {
+    if (k === "l") {
+      c.flashlight = down;
+      return true;
+    }
+    if (!down) return false;
+    if (k === "a") c.facing = "left";
+    else if (k === "d") c.facing = "right";
+    else if (k === "s") c.facing = "closet";
+    else if (k === "w") c.facing = "hall";
+    else if (k === "b") c.facing = "bed";
+    else if (k === "n") applyPress(fnaf, "nightlight");
+    else return false;
+    return true;
+  }
+  return false;
+}
+
+// Raycast the FNAF world's interactables from the camera center (E) or a
+// screen point (click). Calls the item's onInteract, which routes to fnafPress.
+const fnafRay = new THREE.Raycaster();
+function fnafPickAt(ndcX, ndcY) {
+  if (!fnaf) return false;
+  fnafRay.setFromCamera({ x: ndcX, y: ndcY }, camera);
+  const items = fnafWorld.interactables();
+  const hit = fnafRay.intersectObjects(items.map((i) => i.mesh), true)[0];
+  if (!hit) return false;
+  let o = hit.object;
+  while (o && !o.userData.interactableId) o = o.parent;
+  const item = o && items.find((i) => i.id === o.userData.interactableId);
+  if (!item) return false;
+  item.onInteract(hit);
+  return true;
+}
+function fnafInteractCenter() {
+  return fnafPickAt(0, 0);
+}
+
+function showFnafSummary(headline) {
+  $("summaryTitle").textContent = "Night over";
+  $("summaryContent").innerHTML = `${headline}<p class="console-note">Derived values only; no raw sensor data is stored.</p>`;
+  $("summaryPanel").classList.remove("hidden");
+}
+
+function fnafCaught(ev) {
+  const raw = ev?.who ?? ev?.entity ?? "something";
+  const who = raw.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+  const why = ev?.reason ? ` (${ev.reason})` : "";
+  setState(`Caught by ${who}. Press Reset to try again.`);
+  showFnafSummary(`<p class="caught"><strong>CAUGHT.</strong> ${who}${why} at ${fnaf?.engine.snapshot().clock ?? fnaf?.engine.snapshot().hour ?? "?"}.</p>`);
+}
+
+function fnafEvent(ev) {
+  fnafWorld.handle(ev);
+  switch (ev.kind) {
+    case "jumpscare":
+      fnafWorld.prepareScare(ev.who, fnaf.mode);
+      applyFnafFlow(fnafFlow.trigger({ entity: ev.who, kind: "lunge" }));
+      break;
+    case "phone-line":
+      notice(ev.text, { seconds: Math.max(3, ev.dur ?? 3) });
+      break;
+    case "power-warning":
+      notice(`POWER ${ev.level}%. Cameras and doors draw more.`, { alert: true });
+      break;
+    case "power-out":
+      notice("POWER OUT. Stay still.", { alert: true, seconds: 6 });
+      break;
+    case "hour":
+      notice(`${ev.label ?? `${ev.n} AM`}`, { seconds: 2 });
+      break;
+    case "win":
+      setState("6 AM. You survived the night.");
+      showFnafSummary(`<p><strong>You survived Night ${fnafNight}.</strong></p>`);
+      break;
+    default:
+      break;
+  }
+}
+
+function applyFnafFlow(actions) {
+  for (const a of actions) {
+    switch (a.type) {
+      case "duck":
+        audio.duck(a.seconds + 0.2);
+        break;
+      case "lightsCut":
+        fnafWorld.cutLights(a.seconds);
+        break;
+      case "lunge":
+        fnafWorld.lungeScare();
+        break;
+      case "stinger":
+        cue("stinger", { intensity: 1 });
+        break;
+      case "end":
+        fnafCaught(a);
+        break;
+    }
+  }
+}
+
+function updateFnafDock() {
+  const on = !!fnaf;
+  $("powerDock").classList.toggle("hidden", !on);
+  $("fnafStatus").classList.toggle("hidden", !on);
+  if (!on) return;
+  const e = fnaf.engine.snapshot();
+  const pct = Math.round(e.power ?? e.powerDisplay ?? 100);
+  $("powerPct").textContent = e.state === "power-out" ? "OUT" : `${pct}%`;
+  $("powerFill").style.width = `${Math.max(0, Math.min(100, pct))}%`;
+  $("powerBar").dataset.tier = powerTier(pct, e.state === "power-out");
+  $("powerEta").textContent = e.usage ? `usage ${e.usage}` : "";
+  $("loadMonitor").classList.toggle("on", !!e.monitorUp);
+  $("loadFlood").classList.toggle("on", !!fnaf.controls.lightL || !!fnaf.controls.lightR);
+  $("loadDoor").classList.toggle("on", !!e.doors?.left || !!e.doors?.right);
+  $("fnafStatus").textContent = `${MODE_LABELS[fnaf.mode]} · night ${fnafNight} · ${e.clock ?? (e.hour ?? "")}`;
+}
+
+// Per-frame FNAF update. Runs instead of the room loop while a mode is active.
+function fnafFrame(dt, time) {
+  const snap = director.step(dt, performance.now() / 1000);
+  fnaf.engine.setAiLevelMultiplier(adaptiveMultiplier(snap));
+  fnaf.update(dt);
+  for (const ev of fnaf.consumeEvents()) fnafEvent(ev);
+  applyFnafFlow(fnafFlow.update(dt));
+  fnafWorld.update(dt, time / 1000, fnaf, camera, {
+    tension: performance.now() / 1000 < fnafTensionUntil ? 1 : 0,
+  });
+  musicBox.update(current);
+  updateFnafDock();
+}
+
+// Populated once every room object exists; FNAF modes hide these.
+for (const o of scene.children) if (o !== rig) roomRoots.push(o);
+
+// VR mode picker: world-space panels that stay visible in every mode (they are
+// not in roomRoots), so a headset user can always switch modes.
+const modeTargets = [];
+const MODE_PICK = [
+  ["room", "ROOM"],
+  ["fnaf1", "FNAF 1"],
+  ["fnaf2", "FNAF 2"],
+  ["fnaf3", "FNAF 3"],
+  ["fnaf4", "FNAF 4"],
+];
+MODE_PICK.forEach(([mode, label], i) => {
+  const p = panel(0.5, 0.13, 500, 130);
+  const c = p.ctx;
+  c.fillStyle = "#243429";
+  c.fillRect(0, 0, 500, 130);
+  c.strokeStyle = "#9aad86";
+  c.lineWidth = 4;
+  c.strokeRect(3, 3, 494, 124);
+  c.fillStyle = "#f1f5e8";
+  c.font = "bold 42px sans-serif";
+  c.textAlign = "center";
+  c.fillText(label, 250, 82);
+  p.texture.needsUpdate = true;
+  p.mesh.position.set(-0.96 + i * 0.48, 0.98, -1.25);
+  p.mesh.rotation.y = -(i - 2) * 0.12;
+  p.mesh.userData.mode = mode;
+  p.mesh.visible = false;
+  scene.add(p.mesh);
+  modeTargets.push(p.mesh);
+});
+const MODE_PICKER = false; // one combined mode; the picker code stays for later
+function pickModeFromHit(hit) {
+  if (!MODE_PICKER) return false;
+  const mode = hit?.object?.userData?.mode;
+  if (mode) chooseMode(mode);
+  return !!mode;
+}
+
+// ---------- mode menu ----------
+function chooseMode(mode) {
+  $("modeMenu").classList.add("hidden");
+  $("modeToggle").setAttribute("aria-expanded", "false");
+  if (mode === "room") return fnafStop();
+  fnafStart(mode, +$("nightSelect").value);
+}
+$("modeToggle").onclick = () => {
+  const open = $("modeMenu").classList.toggle("hidden") === false;
+  $("modeToggle").setAttribute("aria-expanded", String(open));
+};
+for (const b of document.querySelectorAll("#modeMenu [data-mode]"))
+  b.onclick = () => chooseMode(b.dataset.mode);
+if (!MODE_PICKER) $("modeToggle").classList.add("hidden");
+fnafStart("fnaf1", 1);
+
+// ---------- test panel (hidden; T key or ?test=1) ----------
+// Every button drives the same handler the real game uses: haunt events,
+// power events, the FNAF session/event path, or the same audio cue call.
+// Scares for FNAF modes fast-forward the REAL engine until it kills or drains
+// the player, so the engine (not a fake) decides the scare.
+let testTimer = 0;
+function toggleTestPanel(force) {
+  const el = $("testPanel");
+  const open = typeof force === "boolean" ? force : el.classList.contains("hidden");
+  el.classList.toggle("hidden", !open);
+  return false;
+}
+function testStatus(text) {
+  $("testStatus").textContent = text;
+}
+function testMode() {
+  return $("testMode").value;
+}
+function ensureRoom() {
+  if (fnaf) fnafStop();
+  if (director.phase !== "running") begin();
+}
+function ensureFnaf() {
+  const m = testMode();
+  if (!fnaf || fnaf.mode !== m) fnafStart(m, +$("testNight").value);
+  if (fnaf.phase === "idle") fnafBegin();
+  return m;
+}
+function fastForward(pred, maxSteps = 200000) {
+  let i = 0;
+  for (; i < maxSteps && fnaf.phase === "running" && !pred(); i++) fnaf.update(0.1);
+  return i;
+}
+let fnafTensionUntil = 0; // seconds; drives the office lamp flicker in FNAF1
+function signalLostFor(sec) {
+  monitor.setSignalLost(true);
+  clearTimeout(testTimer);
+  testTimer = setTimeout(() => monitor.setSignalLost(false), sec * 1000);
+}
+function camInterference() {
+  monitor.staticBurst(0.7);
+  cue("static", { intensity: 0.5 });
+}
+const TESTS = {
+  "room-jumpscare": () => {
+    ensureRoom();
+    haunt.jumpscare("attendant", "lunge");
+    return "Attendant jumpscare: haunt event, telegraph, lunge, caught end.";
+  },
+  "room-ghost": () => {
+    ensureRoom();
+    haunt.jumpscare("ghost", "rush");
+    return "Ghost rush: haunt event, telegraph, rush, caught end.";
+  },
+  "room-lunge-only": () => {
+    ensureRoom();
+    attendant.trigger("jumpscare");
+    return "Attendant pose only: lunge with no telegraph and no end (entity check).";
+  },
+  "static-burst": () => {
+    if (fnaf) {
+      ensureFnaf();
+      if (!fnaf.engine.snapshot().monitorUp && fnaf.mode === "fnaf1") applyPress(fnaf, "monitor");
+      if (fnaf.mode === "fnaf1") {
+        applyPress(fnaf, "camera", { room: CAMERAS[(CAMERAS.indexOf(fnaf.controls.room) + 1) % CAMERAS.length] });
+        return "Camera switch with the monitor up: static burst and camera blip.";
+      }
+      fnafEvent({ kind: "static", room: null });
+      return "Static burst (this mode has no room camera feed; sound and HUD only).";
+    }
+    ensureRoom();
+    setCameras(true);
+    camInterference();
+    return "Monitor static burst (same call as a watched entity moving).";
+  },
+  "signal-lost": () => {
+    if (fnaf && fnaf.mode === "fnaf1") {
+      fnafWorld.handle({ kind: "static" });
+      fnaf.controls.monitor = true;
+      return "FNAF1 signal path uses the camera feed; see Static burst.";
+    }
+    ensureRoom();
+    signalLostFor(2);
+    return "Signal lost for 2 s (monitor shows static).";
+  },
+  "power-warning": () => {
+    if (fnaf) { fnafEvent({ kind: "power-warning", level: 20 }); return "Power warning (FNAF handler)."; }
+    ensureRoom();
+    onPowerEvent({ type: "warning", level: 0.2 });
+    return "Power warning (20%): HUD and audio cue.";
+  },
+  "power-critical": () => {
+    if (fnaf) { fnafEvent({ kind: "power-warning", level: 10 }); return "Power critical (FNAF handler, 10%)."; }
+    ensureRoom();
+    onPowerEvent({ type: "critical", level: 0.1 });
+    return "Power critical (10%): stronger HUD notice and audio cue.";
+  },
+  "power-flicker": () => {
+    if (fnaf) {
+      fnafTensionUntil = performance.now() / 1000 + 1.6;
+      return "Power flicker: FNAF1 office lamp stutters while tension is high.";
+    }
+    ensureRoom();
+    onPowerEvent({ type: "flicker", level: 0.2 });
+    return "Power flicker: lamp sag and audio cue.";
+  },
+  "power-blackout": () => {
+    if (fnaf) return TESTS["mode-power-out"]();
+    ensureRoom();
+    onPowerEvent({ type: "blackout" });
+    return "Blackout: monitor dies, then dark, music box, eyes, scare (about 13 s).";
+  },
+  "lights-cut": () => {
+    if (fnaf) { applyFnafFlow([{ type: "lightsCut", seconds: 1.5 }]); return "Lights cut for 1.5 s (FNAF lights only)."; }
+    ensureRoom();
+    applyFlow([{ type: "lightsCut", seconds: 1.5 }]);
+    return "Lights cut for 1.5 s.";
+  },
+  "lamp-flicker": () => {
+    if (fnaf) { fnafTensionUntil = performance.now() / 1000 + 1.6; return "Lamp flicker (FNAF1 office lamp)."; }
+    ensureRoom();
+    lampStutter();
+    return "Lamp stutter: fluorescent flicker for 1.6 s, capped below 3 Hz.";
+  },
+  "door-knock": () => {
+    if (fnaf) { fnafEvent({ kind: "door-knock", who: "ratchet", side: "left", powerLoss: 0 }); return "Door knock at the left door."; }
+    ensureRoom();
+    cue("knock", { position: { x: 0.95, z: -5 }, intensity: 0.8 });
+    return "Door knock at the corridor door.";
+  },
+  "footstep-left": () => footstepAt("left"),
+  "footstep-centre": () => footstepAt("center"),
+  "footstep-right": () => footstepAt("right"),
+  "phone-start": () => {
+    ensureFnaf();
+    if (fnaf.callPhone(+$("testNight").value)) return "Phone call started (subtitles and ring).";
+    return "A phone call is already running.";
+  },
+  "phone-skip": () => {
+    if (!fnaf?.phone) return "No phone call to skip. Start one first.";
+    fnaf.skipPhone();
+    return "Phone call skipped.";
+  },
+  "phone-interrupt": () => {
+    if (!fnaf?.phone) return "No phone call to interrupt. Start one first.";
+    fnaf.interruptPhone();
+    return "Phone call interrupted.";
+  },
+  stinger: () => {
+    cue("stinger", { intensity: 1 });
+    return "Stinger sound.";
+  },
+  "mode-jumpscare": () => {
+    // The engine decides. A night can end in a win, so retry on a fresh night
+    // (up to 6 attempts) until the engine itself produces the scare.
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      ensureFnaf();
+      fastForward(() => fnaf.phase !== "running");
+      if (fnaf.phase === "dead") return `Jumped the real ${MODE_LABELS[testMode()]} engine to its scare (attempt ${attempt}).`;
+      fnafStart(testMode(), +$("testNight").value);
+    }
+    return "No scare in 6 nights of this mode's engine; try again.";
+  },
+  "mode-power-out": () => {
+    ensureFnaf();
+    const m = fnaf.mode;
+    if (m === "fnaf1") {
+      applyPress(fnaf, "door-left");
+      applyPress(fnaf, "door-right");
+      applyPress(fnaf, "monitor");
+      fastForward(() => !!fnaf.engine.snapshot().powerOut);
+      return fnaf.engine.snapshot().powerOut
+        ? "Power out: the real engine reached its power-out sequence."
+        : "Power did not run out before the scare (see Jump to scare).";
+    }
+    if (m === "fnaf2") {
+      fastForward(() => fnaf.engine.snapshot().musicbox?.state === "empty");
+      return "Music box run down (this mode's power-out): escape countdown.";
+    }
+    if (m === "fnaf3") {
+      fastForward(() => Object.values(fnaf.engine.snapshot().systems ?? {}).some((s) => s.fault));
+      return "A system fault (this mode's power-out): reboot it with Y, U or I.";
+    }
+    return "The Bedroom has no power mechanic in its engine; nothing to run out.";
+  },
+};
+function footstepAt(side) {
+  if (fnaf) {
+    ensureFnaf();
+    fnafEvent({ kind: "move", who: side === "left" ? "bellwether" : side === "right" ? "lark" : "ratchet" });
+    return `Footstep, ${side}.`;
+  }
+  ensureRoom();
+  const p = { left: { x: -3, z: -2 }, center: { x: 0, z: -4 }, right: { x: 3, z: -2 } }[side];
+  cue("footstep", { position: p, intensity: 0.8 });
+  return `Footstep, ${side}.`;
+}
+function runTest(id) {
+  const fn = TESTS[id];
+  if (!fn) return testStatus(`Unknown test ${id}`);
+  try {
+    testStatus(fn());
+  } catch (err) {
+    testStatus(`Test error: ${err.message}`);
+    throw err;
+  }
+}
+function resetAll() {
+  if (fnaf) fnafStop();
+  clearTimeout(testTimer);
+  monitor.setSignalLost(false);
+  fnafTensionUntil = 0;
+  reset();
+  testStatus("Reset: room, cameras, power, lights and scares cleared.");
+}
+for (const b of document.querySelectorAll("#testPanel [data-test]")) {
+  b.onclick = () => runTest(b.dataset.test);
+}
+$("testReset").onclick = resetAll;
+$("testClose").onclick = () => toggleTestPanel(false);
+if (new URLSearchParams(location.search).get("test") === "1") toggleTestPanel(true);
+
+// Same-origin operator markers call existing scene functions; continuous input is unchanged.
+function applyLinkedControl(action,c){
+ if(action==='ambient'){if(!audio.enabled)return {applied:false,reason:'Sound is off; opt in manually'};cue('knock',{position:{x:.95,z:-5},intensity:c.strength});return true;}
+ if(action==='light'){if(fnaf)fnafTensionUntil=performance.now()/1000+c.seconds;else lampStutter();return true;}
+ if(action==='environment'){if(fnaf?.mode==='fnaf1'){fnafWorld.handle({kind:'static'});return true;}if(!fnaf&&monitor.isActive()){camInterference();return true;}return {applied:false,reason:'Open cameras for the camera-static mapping'};}
+ if(action==='reaction'){if(fnaf)applyFnafFlow([{type:'lightsCut',seconds:c.seconds}]);else applyFlow([{type:'lightsCut',seconds:c.seconds}]);return true;}
+ return false;
+}
+const signalLink=installSignalLink({canApply:()=>fnaf?fnaf.phase==='running':director.phase==='running'&&!director.paused,actions:Object.fromEntries(['light','ambient','environment','reaction'].map(k=>[k,c=>applyLinkedControl(k,c)]))});
+const signalPanel=mountSignalLinkPanel({adapter:signalLink});
+
+// ---------- render loop ----------
+let lastTime = performance.now(),
+  lastHud = 0,
+  lastAim = 0;
+let floodLevel = 0;
 renderer.setAnimationLoop((time) => {
   const now = performance.now() / 1000,
     dt = Math.min(0.1, Math.max(0, (performance.now() - lastTime) / 1000));
   lastTime = performance.now();
-  if (director.phase === "running") {
-    if (mode !== "live") {
-      const intensity =
-        mode === "manual"
-          ? +$("intensity").value
-          : 0.5 + 0.48 * Math.sin(director.elapsed * 0.18);
-      director.receive(
-        {
-          type: "signal",
-          source: mode,
-          intensity,
-          signal_quality: 1,
-          timestamp: Date.now() / 1000,
-        },
-        now,
-      );
-    } else if (lastSignal && now - receivedAt <= director.config.freshness) {
-      director.receive(lastSignal, receivedAt);
-    }
+  fpsAccum += dt;
+  fpsFrames++;
+  if (fpsAccum >= 0.5) {
+    fpsValue = fpsFrames / fpsAccum;
+    fpsAccum = 0;
+    fpsFrames = 0;
+  }
+  modeTargets.forEach((m) => (m.visible = MODE_PICKER && renderer.xr.isPresenting));
+  if (fnaf) {
+    fnafFrame(dt, time);
+    if (renderer.xr.isPresenting) controllerButtons();
+    renderer.render(scene, camera);
+    return;
   }
   current = director.step(dt, now);
-  if (current.phase === "ended") $("position").disabled = false;
-  const active = current.phase === "running",
+  const running = current.phase === "running" && !current.paused,
+    active = running,
     t = active ? current.tension : 0;
+  const visuals = {
+    tension: t,
+    state: current.state,
+    elapsed: current.elapsed,
+    lighting: $("lighting").checked,
+    fog: $("fog").checked,
+    shadow: $("shadow").checked,
+    shadowPosition: $("position").value,
+    quality: current.quality,
+    phase: time / 1000,
+    xrPresenting: renderer.xr.isPresenting,
+  };
+  walk(dt);
+
+  // --- simulation (only while a session is running and not paused) ---
+  const head = headPose();
+  const ghostVisible = ghost.group.visible && ghost.state !== "hidden";
+  const watched = monitor.getWatchedZone();
+  const ghostSeen = entityObserved({
+    camObserved: coneSees(head, ghost.group),
+    watchedZone: watched,
+    zone: ghostZone(ghost.group.position.z),
+    visible: ghostVisible,
+  });
+  const observed = {
+    attendant: entityObserved({
+      camObserved: coneSees(head, attendant.group),
+      watchedZone: watched,
+      zone: attendantZone(meshWaypoint()),
+    }),
+    // a sealed door holds the corridor back: the ghost's charge drains
+    ghost: ghostSeen || (doorSealed && running),
+  };
+  attendant.setObserved(observed.attendant);
+  ghost.setObserved(ghostSeen);
+  const blackoutNow = power.getState().blackout;
+  if (running) {
+    // power
+    power.setLoad("floodlight", floodOn());
+    power.update(dt * powerScale);
+    for (const e of power.consumeEvents()) onPowerEvent(e);
+    const ps = power.getState();
+    if (blackoutOn) blackoutClock += dt;
+    for (const b of blackoutTimeline.step(blackoutOn, blackoutClock)) onBlackoutBeat(b);
+    if (!windLocked) musicBox.setWind(Math.min(1, power.getLevel() / 0.5));
+    stats.tick(dt, { monitorUp: monitor.isActive(), floodlightOn: floodOn() });
+    // tape briefing + phantom audio-only sounds
+    for (const line of tape.due(current.elapsed)) {
+      notice(line, { seconds: 5.5 });
+      cue("static", { intensity: 0.25 });
+    }
+    const ph = phantom.update(dt, {
+      tension: t,
+      state: current.state,
+      blackout: blackoutNow,
+      scared: flow.phase !== "idle" || haunt.ended,
+    });
+    if (ph) {
+      cue(ph.cue, { position: ph.position, intensity: ph.intensity });
+      lampMotes.agitate(0.15);
+    }
+    // hunt: setObserved -> update -> consume events -> entity update
+    haunt.update(dt, {
+      tension: t,
+      state: current.state,
+      elapsed: current.elapsed,
+      observed,
+    });
+    for (const ev of haunt.consumeEvents()) onHauntEvent(ev);
+    applyFlow(flow.update(dt));
+  }
+  // The mesh follows the model backwards (retreat/reset) once nobody watches.
+  if (running && attendantTargetWp < meshWaypoint() && !attendant.jumping && !observed.attendant && flow.phase === "idle")
+    buildAttendant(attendantTargetWp);
+  if (!running && current.phase !== "running" && attendantTargetWp !== 0 && flow.phase === "idle") attendantTargetWp = 0;
+
+  const tAbs = time / 1000;
+  environment.update(dt, tAbs, visuals);
+  atmosphere.update(dt, tAbs, visuals);
+  attendant.update(dt, tAbs, active ? visuals : { ...visuals, tension: 0, state: "WAIT" });
+  ghost.update(dt, tAbs, visuals);
+  // Monitor feed: three.js re-targets to the XR camera whenever xr.enabled is
+  // true, so disable it around the monitor's own render-target pass.
+  const xrWas = renderer.xr.enabled;
+  renderer.xr.enabled = false;
+  monitor.update(dt, tAbs, visuals);
+  renderer.xr.enabled = xrWas;
+
+  // Floodlight (hold-to-use): attach to camera on desktop, controller in VR.
+  if (!renderer.xr.isPresenting) attachFloodlightToCamera();
+  floodLevel += ((floodOn() ? 1 : 0) - floodLevel) * Math.min(1, dt * 12);
+  floodlight.intensity = 55 * floodLevel;
+  const dark = 1 - atmosphere.blackLevel;
+  lampCone.updateFrom(lamp);
+  const coneI = (visuals.lighting ? 0.35 + 0.4 * (1 - t) : 0.5) * dark;
+  lampCone.setIntensity(coneI);
+  lampMotes.setIntensity(coneI);
+  lampMotes.update(dt);
+  routeEncounter(current);
+  if (current.phase === "ended") {
+    $("position").disabled = false;
+    if (!endHandled) onSessionEnded();
+    if (!summaryShown) {
+      summaryShown = true;
+      $("crosshair").classList.add("hidden");
+      $("interactHint").classList.add("hidden");
+      setState(
+        current.endedReason === "caught"
+          ? "Caught. Press Reset to try again."
+          : "The room settles. Experience complete.",
+      );
+      if (!renderer.xr.isPresenting) showSummary();
+    }
+  }
   hud.mesh.visible = renderer.xr.isPresenting;
-  targets.forEach((target) => (target.visible = renderer.xr.isPresenting));
-  const safe = active && current.state !== "WAIT";
-  // Gentle dimming; slow irregular modulation avoids rapid strobing.
-  const modulation =
-    $("lighting").checked && safe
-      ? 1 -
-        0.1 *
-          t *
-          (0.5 + 0.5 * Math.sin(time * 0.0037) * Math.sin(time * 0.0021))
-      : 1;
-  ambient.intensity = $("lighting").checked ? 0.65 - t * 0.5 : 0.65;
-  lamp.intensity = ($("lighting").checked ? 20 - t * 17 : 20) * modulation;
-  windowLight.intensity = 8 - t * 4;
-  scene.fog.density = $("fog").checked ? 0.035 + t * 0.1 : 0.035;
-  figure.visible = $("shadow").checked && safe && t > 0.45;
-  silhouette.opacity = THREE.MathUtils.clamp((t - 0.4) * 2, 0, 0.85);
-  const loc = $("position").value;
-  figure.position.set(
-    loc === "left" ? -2.7 : loc === "right" ? 2.7 : 0,
-    0,
-    loc === "back" ? -5.3 : -4.7,
-  );
+  targets.forEach((m) => (m.visible = renderer.xr.isPresenting));
+  powerPanel.mesh.visible = monitor.isActive() || renderer.xr.isPresenting || running;
   if (renderer.xr.isPresenting) controllerButtons();
-  updateAudio(t, safe);
+  audio.update(current, renderer.xr.isPresenting ? renderer.xr.getCamera() : camera);
+  musicBox.update(current);
+  if (!renderer.xr.isPresenting && active && time - lastAim > 150) {
+    lastAim = time;
+    const aimed = desktopAim();
+    $("interactHint").classList.toggle("hidden", !aimed);
+    if (aimed)
+      $("interactHint").textContent =
+        aimed.id === "corridor-door"
+          ? `Press E: ${doorSealed ? "open" : "seal"} the door`
+          : `Press E — ${aimed.label}`;
+  }
   if (time - lastHud > 150) {
     lastHud = time;
     drawHud(current);
-    $("sourceStat").textContent = (
-      mode === "live" ? current.source : mode
-    ).toUpperCase();
-    $("stateStat").textContent = current.state;
-    $("tensionStat").textContent = current.tension.toFixed(2);
-    $("qualityStat").textContent = current.quality.toFixed(2);
-    const sec = Math.ceil(current.remaining);
-    $("timeStat").textContent =
-      `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
-    $("connection").textContent =
-      mode === "live"
-        ? `Relay ${connection} · ${current.fresh ? "receiving" : "waiting for fresh input"}`
-        : `${mode.toUpperCase()} DEMO · no hardware claim`;
-    if (current.phase === "ended")
-      $("sessionState").textContent =
-        "The room settles. Experience complete. Reset to begin again.";
+    updateStats(current);
   }
   renderer.render(scene, camera);
 });
+window.__fnaf = {
+  get session() {
+    return fnaf;
+  },
+  get flow() {
+    return fnafFlow;
+  },
+  world: fnafWorld,
+  get rigPosition() {
+    return rig.position.toArray();
+  },
+};
+window.__quiet = {
+  signalLink,
+  director,
+  haunt,
+  power,
+  monitor,
+  flow,
+  stats,
+  atmosphere,
+  floodlight,
+  camera,
+  rig,
+  get attendant() {
+    return attendant;
+  },
+  ghost,
+  renderer,
+  scene,
+  get doorSealed() {
+    return doorSealed;
+  },
+  get floodOn() {
+    return floodOn();
+  },
+  get audioEnabled() {
+    return audioEnabled;
+  },
+  setLook(y, p = 0) {
+    yaw = y;
+    pitch = p;
+    camera.rotation.set(pitch, yaw, 0);
+  },
+};
 window.addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
 window.addEventListener("pagehide", () => {
-  clearTimeout(retryTimer);
-  socketGeneration++;
-  socket?.close();
-  audio?.context.close();
+  signalPanel.dispose();
+  signalLink.dispose();
+  client.dispose();
+  audio.dispose();
+  musicBox.dispose();
 });

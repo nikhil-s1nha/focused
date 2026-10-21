@@ -1,0 +1,65 @@
+Graph monitor + Roboflow
+
+From haunted-room:
+  npm ci
+  HOST=127.0.0.1 PORT=48080 npm start
+
+Game:   http://127.0.0.1:48080/simple.html
+Graphs: http://127.0.0.1:48080/roboflow.html
+Use the same server for both. If you also need the partner's packet receiver,
+use npm run start:signal with those HOST/PORT variables to load its local token.
+
+Roboflow
+1. Select Roboflow in Analysis engine.
+2. Enter your project/version and API key, or choose Workflow and enter its
+   workspace, ID, and output key. The Workflow needs an image input named image
+   and a detection/classification output (usually predictions).
+3. Save, choose a graph image or video, and analyze a frame. Detection results
+   get boxes; classification results get labels and confidence scores.
+4. For the game, choose graph window, set the exact class names to react to,
+   enable Send live matches to the game, and save. Start the game and monitor.
+
+Frames go to Roboflow's Serverless Cloud API and use your account's allowance.
+The server holds the key in memory; it is not returned to the browser, stored
+in browser storage, or put in URLs. Forget key clears it. You can also set
+ROBOFLOW_MODEL_ID and ROBOFLOW_API_KEY in your shell before starting the server.
+No trained EEG model or Workflow is included; one must be configured separately.
+
+Game connection
+Two matching live frames send an internal observation over /signal-link/events.
+It includes the source, model ID, class, confidence, round and encounter IDs.
+The director slightly increases the weight of the associated scare type for
+later encounters, while keeping its timing and variety. Two clear frames rearm
+the matcher; there is a five-second cooldown. Invalid, late or stopped-round
+results are dropped. The partner's Signal Scope v1/v2 JSON stays unchanged.
+
+Files are preview-only. A live graph window is needed to affect the game.
+Stop on the monitor stops capture analysis; Stop in the game blocks game events
+but does not stop preview inference. Keep the monitor on the scene laptop;
+Quest receives the events through the normal game connection.
+
+Local option (the default)
+Choose one trace's area, click its line to pick the color, then Analyze or Start.
+This uses pixel color, a median baseline and deviation thresholds. Lower the
+threshold multiplier or minimum pixel change for more sensitivity. Keep axes,
+labels and other channels out of the selected area. Unclear traces are skipped.
+It needs two clear frames before two changed frames can send an event. A peak
+must clear before it can trigger again. Local mode does not call Roboflow.
+
+Both paths detect visual patterns. A graph change or model confidence alone
+does not establish fear. The reaction lamp has a separate visual fallback;
+use the monitor's game events count to check whether observations were sent.
+
+Code
+  roboflow/bridge.mjs             Roboflow requests and result handling
+  public/roboflow-viewer.mjs      graph input, capture and overlays
+  public/graph-detector.mjs       local trace detector
+  roboflow/local-bridge.mjs       local detector endpoint and event gating
+  public/simple/event-director.mjs  next-encounter selection
+
+Checks
+  node --test test/roboflow.test.mjs test/local-graph.test.mjs
+Tests use synthetic graph pixels and stubbed Roboflow responses. An actual
+model/image inference still needs to be checked with a configured account.
+
+API: https://docs.roboflow.com/deployment/roboflow-cloud/serverless-api

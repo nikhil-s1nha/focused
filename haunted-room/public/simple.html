@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The Quiet Room — Night Watch</title>
+    <link rel="stylesheet" href="/simple/launch.css" />
+    <script type="importmap">
+      { "imports": { "three": "/vendor/three.module.js", "three/addons/": "/vendor/addons/" } }
+    </script>
+  <style>
+#test,#signalLinkPanel,#vrnote,#source-note,#intensityLabel,#eventStatus,#reset,#bar label:has(#source),#bar label:has(#audioBoost){display:none!important}
+#bar{background:linear-gradient(#080808c0,transparent);border:0}
+</style></head>
+  <body>
+    <div id="viewport"></div>
+
+    <div id="bar">
+      <label>Signal source
+        <select id="source">
+          <option value="manual">Manual proxy</option>
+          <option value="synthetic">Simulated signal</option>
+          <option value="live">Live stream</option>
+        </select>
+      </label>
+      <label id="intensityLabel">Proxy input
+        <input id="intensity" type="range" min="0" max="1" step="0.01" value="0.1" aria-label="Manual input; low builds tension" />
+        <span id="intensityValue">0.10</span>
+      </label>
+      <label id="soundLabel"><input id="sound" type="checkbox" /> Enable sound</label>
+      <label>Audio boost <select id="audioBoost"><option value="1">1×</option><option value="2">2×</option><option value="3" selected>3×</option></select></label>
+      <span id="lives" role="status" aria-live="polite" style="font:bold 18px monospace;white-space:nowrap;color:#f4dba5">♥♥♥♥♥ 5 / 5 LIVES</span>
+      <span id="acquisitionStatus" role="status">Signal Scope: disconnected</span>
+      <span id="eventStatus" role="status" style="font:12px monospace;color:#d6c39b">Waiting to start partner-event session</span>
+      <button id="stop" type="button" disabled style="background:#891f28;color:white;font-weight:bold">STOP GAME (Esc)</button>
+      <button id="reset" type="button">Reset</button>
+      <span id="status" role="status" aria-live="polite">Ready.</span>
+    </div>
+
+    <div id="intro" class="card">
+      <div class="eyebrow"><span class="pilot-light"></span> Night watch / Observation room 04</div>
+      <h1>THE QUIET<br /><em>ROOM</em></h1>
+      <p class="intro-lead">Four doors. One rule: keep watching.</p>
+      <p>You are alone in the observation room. Listen for movement from all four doors. Some figures retreat; others rush in. You have five lives. Watch the attacking door before it lunges or lose a life. Survive the two-minute watch.</p>
+      <div class="watch-rule" aria-label="How to play"><span><b>01</b> Watch the doors</span><span><b>02</b> Expect false alarms</span><span><b>03</b> Survive the watch</span></div>
+      <button id="start" class="primary" type="button">Begin night watch <span>SPACE →</span></button>
+      <p class="control-note">Drag to look · Space to begin · Esc to stop · F for fullscreen</p>
+      <p id="source-note">Manual proxy. No hardware connected. Sound is off until you enable it.</p>
+      <div class="card-foot">ADAPTIVE HORROR DEMONSTRATION <span>04 / RESTRICTED</span></div>
+    </div>
+
+    <div id="summary" class="card hidden">
+      <h1 id="summaryTitle">You survived</h1>
+      <p id="summaryText"></p>
+      <button id="again" class="primary" type="button">Try again (R)</button>
+    </div>
+
+    <style>
+      #reactionIndicator{position:fixed;top:110px;right:22px;z-index:30;width:210px;padding:22px 18px;border:1px solid #ff454533;border-radius:10px;background:transparent;color:#ff777755;pointer-events:none;text-align:center;transition:background .15s,box-shadow .15s,color .15s;letter-spacing:2px;font:700 16px/1.4 monospace}
+      #reactionIndicator small{display:block;font:10px/1.6 monospace;letter-spacing:1px;margin-top:6px}
+      #reactionIndicator.active{background:#de1020e8;color:white;border-color:#ff7272;box-shadow:0 0 25px #ff1525bb,0 0 65px #ff152566;animation:reactionGlow .85s ease-in-out infinite alternate}
+      @keyframes reactionGlow{to{box-shadow:0 0 40px #ff1525ee,0 0 85px #ff152588;background:#ff2332f0}}
+      @media(prefers-reduced-motion:reduce){#reactionIndicator.active{animation:none}}
+    </style>
+    <div id="reactionIndicator" role="status" aria-live="polite">reaction signal</div>
+    <div id="caption" class="hidden"></div>
+
+    <details id="test">
+      <summary>Test scares (T)</summary>
+      <div class="row">
+        <button data-scare="left" type="button">Left door</button>
+        <button data-scare="right" type="button">Right door</button>
+        <button data-scare="front" type="button">Front door</button>
+        <button data-scare="back" type="button">Back door</button>
+        <button data-scare="front" data-character="momo" type="button">Momo</button>
+        <button data-scare="front" data-character="pennywise" type="button">Clown</button>
+        <button data-scare="caught" type="button">Caught scare</button>
+        <button data-fx="flicker" type="button">Flicker</button>
+        <button data-fx="cut" type="button">Lights cut</button>
+        <button data-fx="creak" type="button">Creak</button>
+        <button data-fx="breath" type="button">Breath</button>
+      </div>
+    </details>
+
+    <details id="signalLinkPanel">
+      <summary><span class="pilot-light"></span> Signal Scope / operator link</summary>
+      <div class="signal-body">
+        <p class="operator-note">Operator markers / manual tests — not EEG classification</p>
+        <label class="signal-toggle"><input id="signalLinkEnabled" type="checkbox" checked /> Allow linked event actions during the session</label>
+        <dl class="signal-grid">
+          <dt>Connection</dt><dd id="slConnection">Waiting</dd>
+          <dt>Last event</dt><dd id="slLastEvent">—</dd>
+          <dt>Source</dt><dd id="slSource">—</dd>
+          <dt>Event ID</dt><dd id="slEventId">—</dd>
+          <dt>Value</dt><dd id="slValue">—</dd>
+          <dt>Age</dt><dd id="slAge">—</dd>
+          <dt>Action</dt><dd id="slAction">None</dd>
+          <dt>Counts</dt><dd id="slCounts">0</dd>
+          <dt>Error</dt><dd id="slError">—</dd>
+        </dl>
+      </div>
+    </details>
+
+    <div id="vrnote">VR: point at START / PLAY AGAIN and squeeze index trigger. A/X = sound.</div>
+    <script type="module" src="/simple-app.mjs"></script>
+  </body>
+</html>

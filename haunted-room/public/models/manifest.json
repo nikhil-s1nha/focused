@@ -1,0 +1,26 @@
+{
+  "models": [
+    {
+      "id": "kenney-zombie",
+      "file": "kenney-zombie.glb",
+      "triangles": 1078,
+      "notes": "Stylized blocky character, 1078 tris, 512px colormap shared via Textures/colormap.png. Not frightening alone; usable as a silhouette/doorway figure. Node animations (idle, walk, attack-melee) not skinned.",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "author": "Kenney (www.kenney.nl)",
+      "sourceUrl": "https://www.kenney.nl/assets/graveyard-kit",
+      "attribution": "Graveyard Kit by Kenney (CC0, attribution optional)"
+    },
+    {
+      "id": "kenney-ghost",
+      "file": "kenney-ghost.glb",
+      "triangles": 413,
+      "notes": "Cute stylized ghost, 413 tris. Weak scare value; placeholder only.",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "author": "Kenney (www.kenney.nl)",
+      "sourceUrl": "https://www.kenney.nl/assets/graveyard-kit",
+      "attribution": "Graveyard Kit by Kenney (CC0, attribution optional)"
+    }
+  ]
+}

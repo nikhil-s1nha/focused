@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EEG graph monitor</title><link rel="stylesheet" href="/roboflow.css"></head>
+<body><main>
+<header><h1>eeg / graph monitor</h1><a href="/simple.html" target="_blank" rel="noopener">open game</a></header>
+<p id="status" role="status">Local graph detector ready. No account or key needed.</p>
+<label>Analysis engine <select id="engine"><option value="local">Local graph changes · no key</option><option value="roboflow">Roboflow · trained model required</option></select></label>
+<section id="localSettings">
+<p class="note">1. Choose a file or share the EEG window. 2. Drag a box around one trace, excluding labels and axes. 3. Pick the trace color and start. Detects plotted changes, not fear.</p>
+<div class="toolbar"><button id="selectRegion" disabled>select graph area</button><button id="wholeFrame" disabled>use whole frame</button><button id="pickColor" disabled>pick trace color</button><label>Trace color <input id="traceColor" type="color" value="#00ff88"></label><span id="selection">no graph area selected</span></div>
+<div class="local-options"><label>Threshold multiplier <input id="sensitivity" type="number" value="4.5" min="2" max="12" step="0.5"></label><label>Minimum change (pixels) <input id="minAmplitude" type="number" value="10" min="3" max="400" step="1"></label><label>Color tolerance <input id="tolerance" type="number" value="55" min="5" max="150" step="5"></label></div>
+<label class="check"><input id="localForward" type="checkbox" checked> Send live graph changes to the game</label>
+<p class="note">Lower thresholds detect smaller changes. The live link arms after two clear frames, then requires two changed frames. A persistent peak sends one event. No images go to a cloud service in local mode.</p>
+</section>
+<details open id="settings" hidden><summary>Roboflow connection settings</summary>
+<form id="configure">
+<label>Target <select id="mode"><option value="model">Trained model</option><option value="workflow">Workflow</option></select></label>
+<div id="modelFields"><label>Model ID <input id="modelId" placeholder="your-project/1" autocomplete="off"></label></div>
+<div id="workflowFields" hidden><label>Workspace <input id="workspace" autocomplete="off"></label><label>Workflow ID <input id="workflowId" autocomplete="off"></label><label>Prediction output key <input id="outputKey" value="predictions" autocomplete="off"></label></div>
+<label>Private API key <input id="apiKey" type="password" autocomplete="off" placeholder="stored in server memory only"></label>
+<label>Minimum confidence <input id="confidence" type="number" min="0.1" max="1" step="0.05" value="0.65"></label>
+<label>Classes that should influence the next scare <input id="reactionClasses" placeholder="exact model labels, comma separated" autocomplete="off"></label>
+<label class="check"><input id="forwardToGame" type="checkbox"> Send live matches to the game</label>
+<p class="note">Two consecutive matching frames are required. Events follow the game's existing pacing. A model class match is not a verified fear measurement.</p>
+<button type="submit" id="save">save connection</button> <button type="button" id="disconnect">forget key</button>
+</form></details>
+<section class="inputs"><label>EEG image / video <input id="file" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime"></label><button id="share">choose graph window</button><button id="clear" disabled>clear input</button></section>
+<p class="note" id="privacy">Local analysis runs on this computer. Recorded files are preview-only. For live game events, share the EEG graph window and start the game.</p>
+<div class="toolbar"><button id="once" disabled>analyze frame</button><button id="start" disabled>start · 1 frame/sec</button><button id="stop" disabled>stop</button><span id="source">no input</span></div>
+<div id="preview"><canvas id="overlay" width="960" height="540" aria-label="Selected graph, analysis region, and detected changes"></canvas><p id="empty">Choose an image, video, or graph window.</p></div>
+<p id="stats">frames: 0 · game events: 0</p>
+<section><h2>observations</h2><pre id="predictions">No analysis yet.</pre></section>
+<video id="video" muted playsinline hidden></video><img id="image" alt="" hidden>
+</main><script type="module" src="/roboflow-viewer.mjs"></script></body></html>
